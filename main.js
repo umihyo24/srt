@@ -492,13 +492,21 @@ function renderBuildPhase() {
   app.innerHTML = `
     <div class="phase-root">
       <div class="topbar build-header">
-        <div>
+        <div class="build-header-main">
           <h2>ビルドフェーズ（ショップ＆リール編集）</h2>
           <div class="badges build-main-stats">
             <div class="badge">ラウンド ${gameState.round}</div>
             <div class="badge">コイン ${gameState.coins}</div>
             <div class="badge">HP ${gameState.hp}</div>
           </div>
+        </div>
+        <div class="build-header-actions">
+          <button class="btn-primary build-start-btn" data-act="start" ${pendingMonster ? "disabled" : ""}>勝ちに行く</button>
+          ${
+            pendingMonster
+              ? '<p class="build-start-hint">配置待ちモンスターの配置後にバトル開始できます。</p>'
+              : '<p class="build-start-hint">準備ができたらすぐ出撃できます。</p>'
+          }
         </div>
       </div>
 
@@ -559,16 +567,6 @@ function renderBuildPhase() {
             </div>
           </section>
 
-          <section class="panel build-start-panel">
-            <h3>バトル開始</h3>
-            <p class="muted">準備ができたら次の戦闘へ。</p>
-            <button class="btn-primary build-start-btn" data-act="start" ${pendingMonster ? "disabled" : ""}>勝ちに行く</button>
-            ${
-              pendingMonster
-                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
-                : ""
-            }
-          </section>
         </div>
 
         <aside class="phase-root">
