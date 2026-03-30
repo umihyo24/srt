@@ -1,7 +1,15 @@
 const MONSTERS = [
   { id: "slime", name: "スライム", cost: 1, hp: 1, atk: 1, cls: "m-slime" },
   { id: "skeleton", name: "スケルトン", cost: 2, hp: 2, atk: 2, cls: "m-skeleton" },
-  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie" }
+  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie" },
+  { id: "bat", name: "バット", cost: 1, hp: 1, atk: 1, cls: "m-bat" },
+  { id: "wolf", name: "ウルフ", cost: 2, hp: 2, atk: 3, cls: "m-wolf" },
+  { id: "goblin", name: "ゴブリン", cost: 1, hp: 2, atk: 1, cls: "m-goblin" },
+  { id: "imp", name: "インプ", cost: 2, hp: 1, atk: 3, cls: "m-imp" },
+  { id: "knight", name: "ナイト", cost: 3, hp: 3, atk: 3, cls: "m-knight" },
+  { id: "ghost", name: "ゴースト", cost: 2, hp: 1, atk: 2, cls: "m-ghost" },
+  { id: "mushroom", name: "マッシュルーム", cost: 1, hp: 2, atk: 1, cls: "m-mushroom" },
+  { id: "lizard", name: "リザード", cost: 2, hp: 2, atk: 2, cls: "m-lizard" }
 ];
 
 const CLASS_CHOICES = [
@@ -17,6 +25,8 @@ const INITIAL_STATE = () => ({
   hp: 12,
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
+  shopChoices: rollShopChoices(MONSTERS, 3),
+  rerollCost: 1,
   selectedMonsterId: null,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
@@ -47,9 +57,24 @@ const INITIAL_STATE = () => ({
 const gameState = INITIAL_STATE();
 const app = document.getElementById("app");
 const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスターを購入してリールに配置します" });
+const SHOP_SIZE = 3;
 
 function resetBuildUiState() {
   gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
+}
+
+function getSellValue(monster) {
+  if (!monster) return 0;
+  return Math.floor(monster.cost / 2);
+}
+
+function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
+  const candidates = [...pool];
+  for (let i = candidates.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((monster) => monster.id);
 }
 
 function update(action, payload = {}) {
@@ -99,6 +124,7 @@ function update(action, payload = {}) {
     case "buyMonster": {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster || gameState.phase !== "build") return;
+      if (!gameState.shopChoices.includes(monster.id)) return;
       gameState.selectedMonsterId = monster.id;
       gameState.selectedSource = "shop";
       gameState.selectedSlotIndex = null;
@@ -134,6 +160,17 @@ function update(action, payload = {}) {
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
       return;
     }
+    case "rerollShop": {
+      if (gameState.phase !== "build") return;
+      if (gameState.coins < gameState.rerollCost) {
+        gameState.buildStatus = { type: "warn", text: "リロールに必要なコインが不足しています" };
+        return;
+      }
+      gameState.coins -= gameState.rerollCost;
+      gameState.shopChoices = rollShopChoices(MONSTERS, SHOP_SIZE);
+      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.rerollCost}コイン）` };
+      return;
+    }
     case "placePendingMonster": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement === null) return;
@@ -153,62 +190,21 @@ function update(action, payload = {}) {
     }
     case "sellSelectedMonster": {
       if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) return;
       if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
       const idx = gameState.selectedSlotIndex;
+      if (idx < 0 || idx >= gameState.reels.length) return;
       const monsterId = gameState.reels[idx];
       if (!monsterId) return;
       const monster = monsterById(monsterId);
       if (!monster) return;
-      const sellValue = Math.floor(monster.cost / 2);
+      const sellValue = getSellValue(monster);
       gameState.coins += sellValue;
       gameState.reels[idx] = null;
       gameState.selectedMonsterId = null;
       gameState.selectedSource = null;
       gameState.selectedSlotIndex = null;
-      gameState.buildStatus = { type: "info", text: `${monster.name}を売却。コイン+${sellValue}` };
-      gameState.swapMode = false;
-      gameState.swapSourceIndex = null;
-      return;
-    }
-    case "startSwap": {
-      if (gameState.phase !== "build") return;
-      if (gameState.pendingPlacement !== null) {
-        gameState.buildStatus = { type: "warn", text: "配置待ち中は入れ替えできません" };
-        return;
-      }
-      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
-      gameState.swapMode = true;
-      gameState.swapSourceIndex = gameState.selectedSlotIndex;
-      gameState.buildStatus = { type: "info", text: "入れ替え先のスロットを選んでください" };
-      return;
-    }
-    case "cancelSwap": {
-      if (gameState.phase !== "build") return;
-      gameState.swapMode = false;
-      gameState.swapSourceIndex = null;
-      gameState.buildStatus = { type: "info", text: "入れ替えをキャンセルしました" };
-      return;
-    }
-    case "swapSlotWithSource": {
-      if (gameState.phase !== "build" || !gameState.swapMode) return;
-      const targetIndex = payload.index;
-      const sourceIndex = gameState.swapSourceIndex;
-      if (sourceIndex === null || targetIndex < 0 || targetIndex >= gameState.reels.length) return;
-      if (targetIndex === sourceIndex) return;
-      [gameState.reels[sourceIndex], gameState.reels[targetIndex]] = [gameState.reels[targetIndex], gameState.reels[sourceIndex]];
-      gameState.swapMode = false;
-      gameState.swapSourceIndex = null;
-      gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
-      const movedMonsterId = gameState.reels[targetIndex];
-      if (movedMonsterId) {
-        gameState.selectedMonsterId = movedMonsterId;
-        gameState.selectedSource = "reel";
-        gameState.selectedSlotIndex = targetIndex;
-      } else {
-        gameState.selectedMonsterId = null;
-        gameState.selectedSource = null;
-        gameState.selectedSlotIndex = null;
-      }
+      gameState.buildStatus = { type: "info", text: `${monster.name}を売却しました（+${sellValue}コイン）` };
       return;
     }
     case "startBattle": {
@@ -327,6 +323,7 @@ function update(action, payload = {}) {
       gameState.classBonus = picked.id;
       gameState.phase = "build";
       resetBuildUiState();
+      gameState.shopChoices = rollShopChoices(MONSTERS, SHOP_SIZE);
       gameState.enemy = {
         name: `ラウンド${gameState.round}の敵`,
         hp: 10 + gameState.round * 2,
@@ -465,8 +462,28 @@ function getBuildStatusDisplay() {
   return status;
 }
 
+function getCurrentClassInfo(classBonus) {
+  const picked = CLASS_CHOICES.find((c) => c.id === classBonus);
+  if (!picked) {
+    return {
+      name: "現在の職業: なし",
+      desc: "職業を獲得するとここに効果が表示されます。"
+    };
+  }
+  return {
+    name: `現在の職業: ${picked.name}`,
+    desc: picked.desc
+  };
+}
+
 function renderBuildPhase() {
+  const visibleShopMonsters = gameState.shopChoices
+    .map((id) => monsterById(id))
+    .filter(Boolean);
+  const classInfo = getCurrentClassInfo(gameState.classBonus);
   const selected = monsterById(gameState.selectedMonsterId);
+  const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
+  const sellValue = getSellValue(selected);
   const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
   const pendingMonster = monsterById(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
@@ -491,11 +508,14 @@ function renderBuildPhase() {
               <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
               配置先を選ぶ（手動配置）
             </label>
+            <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+              <button class="small btn-secondary" data-act="reroll-shop">リロール (${gameState.rerollCost}コイン)</button>
+            </div>
             <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
               ${buildStatus.text}
             </div>
             <div class="shop-grid">
-              ${MONSTERS.map(
+              ${visibleShopMonsters.map(
                 (m) => `
                 <article class="card ${m.cls} ${
                   gameState.selectedSource === "shop" && gameState.selectedMonsterId === m.id ? "build-selected-shop" : ""
@@ -540,6 +560,12 @@ function renderBuildPhase() {
 
         <aside class="phase-root">
           <section class="panel">
+            <h3>現在の職業</h3>
+            <p><strong>${classInfo.name}</strong></p>
+            <p class="muted">${classInfo.desc}</p>
+          </section>
+
+          <section class="panel">
             <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
             ${
               pendingMonster
@@ -547,7 +573,13 @@ function renderBuildPhase() {
                 : selected
                   ? `<div class="monster-chip ${selected.cls}">${selected.name}</div>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
-                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>`
+                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
+                    ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
+                    ${
+                      canSell
+                        ? '<button class="small btn-danger" data-act="sell-selected">売却</button>'
+                        : ""
+                    }`
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
@@ -585,6 +617,11 @@ function bindBuildEvents() {
     });
   });
 
+  app.querySelector("[data-act='reroll-shop']")?.addEventListener("click", () => {
+    update("rerollShop");
+    render();
+  });
+
   app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
     card.addEventListener("click", (event) => {
       if (event.target?.closest("[data-act='buy']")) return;
@@ -609,14 +646,6 @@ function bindBuildEvents() {
 
   app.querySelector("[data-act='sell-selected']")?.addEventListener("click", () => {
     update("sellSelectedMonster");
-    render();
-  });
-  app.querySelector("[data-act='start-swap']")?.addEventListener("click", () => {
-    update("startSwap");
-    render();
-  });
-  app.querySelector("[data-act='cancel-swap']")?.addEventListener("click", () => {
-    update("cancelSwap");
     render();
   });
 

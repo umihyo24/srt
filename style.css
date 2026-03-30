@@ -184,6 +184,11 @@ button {
 .m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }
 .m-skeleton { background: rgba(76, 122, 255, 0.22); border: 1px solid #5f7dff; }
 .m-zombie { background: rgba(153, 95, 255, 0.2); border: 1px solid #9e75ff; }
+.m-bat, .m-ghost { background: rgba(180, 214, 255, 0.18); border: 1px solid #7ca8da; }
+.m-wolf, .m-lizard { background: rgba(86, 168, 132, 0.2); border: 1px solid #4ea177; }
+.m-goblin, .m-mushroom { background: rgba(122, 189, 88, 0.2); border: 1px solid #78b157; }
+.m-imp { background: rgba(255, 120, 120, 0.2); border: 1px solid #d36d6d; }
+.m-knight { background: rgba(190, 190, 210, 0.2); border: 1px solid #9da3b6; }
 
 .panel {
   padding: 12px;
