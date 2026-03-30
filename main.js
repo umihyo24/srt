@@ -224,18 +224,18 @@ function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
   });
 }
 
-function getVisualSlotIndices() {
-  const indices = [];
-  for (let col = 0; col < 3; col += 1) {
-    for (let row = 0; row < 6; row += 1) {
-      indices.push(row * 3 + col);
+function getVisualOrderIndices(cols, rows) {
+  const result = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      result.push(row * cols + col);
     }
   }
-  return indices;
+  return result;
 }
 
 function getFirstEmptyVisualSlotIndex(reels) {
-  const visualOrder = getVisualSlotIndices();
+  const visualOrder = getVisualOrderIndices(3, 6);
   return visualOrder.find((idx) => reels[idx] === null) ?? -1;
 }
 
