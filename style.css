@@ -209,11 +209,30 @@ button {
 
 .battle-action-row {
   display: flex;
+  gap: 10px;
   justify-content: center;
 }
 
 .battle-spin-btn {
   min-width: 220px;
+}
+
+.battle-next-btn {
+  min-width: 140px;
+}
+
+.battle-step-panel {
+  font-weight: 700;
+}
+
+.battle-step-victory {
+  border-color: #3f8a4b;
+  background: linear-gradient(180deg, #173521, #102a1a);
+}
+
+.battle-step-defeat {
+  border-color: #8a3f58;
+  background: linear-gradient(180deg, #361923, #2b121a);
 }
 
 .log {

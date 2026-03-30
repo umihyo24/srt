@@ -28,6 +28,11 @@ const INITIAL_STATE = () => ({
     gridRows: 3,
     lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
     log: [],
+    subPhase: "idle", // idle | spinning | player_result | enemy_result | victory | defeat
+    stepMessages: [],
+    stepIndex: -1,
+    pendingOutcome: null, // victory | defeat | null
+    awaitingContinue: false,
     resolved: false,
     won: null
   }
@@ -80,6 +85,11 @@ function update(action, payload = {}) {
         gridRows: 3,
         lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
+        subPhase: "idle",
+        stepMessages: [],
+        stepIndex: -1,
+        pendingOutcome: null,
+        awaitingContinue: false,
         resolved: false,
         won: null
       };
@@ -87,31 +97,89 @@ function update(action, payload = {}) {
     }
     case "spin": {
       if (gameState.phase !== "battle" || gameState.battle.resolved) return;
+      if (gameState.battle.subPhase !== "idle") return;
+      gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
       gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
       const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classBonus);
       const dmg = damageBreakdown.totalDamage;
       gameState.battle.lastDamage = damageBreakdown;
       gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
-      gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計 ${dmg} ダメージ`);
+      const playerMessages = buildPlayerResultMessages(gameState.battle.visibleGrid, dmg);
+      gameState.battle.stepMessages = playerMessages;
+      gameState.battle.stepIndex = 0;
+      gameState.battle.subPhase = "player_result";
+      gameState.battle.pendingOutcome = gameState.battle.enemyHp <= 0 ? "victory" : null;
+      gameState.battle.awaitingContinue = true;
+      gameState.battle.log.push(playerMessages[0]);
+      return;
+    }
+    case "battleNext": {
+      if (gameState.phase !== "battle") return;
+      if (!gameState.battle.awaitingContinue) return;
+      const { stepMessages, stepIndex, subPhase } = gameState.battle;
+      const hasNextMessage = stepIndex + 1 < stepMessages.length;
+      if (hasNextMessage) {
+        gameState.battle.stepIndex += 1;
+        gameState.battle.log.push(stepMessages[gameState.battle.stepIndex]);
+        return;
+      }
 
-      if (gameState.battle.enemyHp <= 0) {
-        gameState.battle.log.push("敵を撃破！報酬フェーズへ進みます。");
-        gameState.battle.resolved = true;
-        gameState.battle.won = true;
+      if (subPhase === "player_result") {
+        if (gameState.battle.pendingOutcome === "victory") {
+          gameState.battle.subPhase = "victory";
+          gameState.battle.resolved = true;
+          gameState.battle.won = true;
+          gameState.battle.awaitingContinue = true;
+          gameState.battle.stepMessages = ["敵を倒した！"];
+          gameState.battle.stepIndex = 0;
+          gameState.battle.log.push("敵を倒した！");
+          return;
+        }
+
+        const enemyMessages = buildEnemyResultMessages(gameState.enemy.atk);
+        gameState.hp -= gameState.enemy.atk;
+        gameState.battle.stepMessages = enemyMessages;
+        gameState.battle.stepIndex = 0;
+        gameState.battle.subPhase = "enemy_result";
+        gameState.battle.awaitingContinue = true;
+        gameState.battle.log.push(enemyMessages[0]);
+
+        if (gameState.hp <= 0 || gameState.battle.turn >= 6) {
+          gameState.battle.pendingOutcome = "defeat";
+        } else {
+          gameState.battle.pendingOutcome = null;
+        }
+        return;
+      }
+
+      if (subPhase === "enemy_result") {
+        if (gameState.battle.pendingOutcome === "defeat") {
+          gameState.battle.subPhase = "defeat";
+          gameState.battle.resolved = true;
+          gameState.battle.won = false;
+          gameState.battle.awaitingContinue = true;
+          gameState.battle.stepMessages = ["敗北…戦闘不能。"];
+          gameState.battle.stepIndex = 0;
+          gameState.battle.log.push("敗北…戦闘不能。");
+          return;
+        }
+
+        gameState.battle.subPhase = "idle";
+        gameState.battle.awaitingContinue = false;
+        gameState.battle.stepMessages = [];
+        gameState.battle.stepIndex = -1;
+        return;
+      }
+
+      if (subPhase === "victory") {
         gameState.phase = "reward";
         gameState.coins += 8;
         gameState.round += 1;
         return;
       }
 
-      gameState.hp -= gameState.enemy.atk;
-      gameState.battle.log.push(`敵の反撃: ${gameState.enemy.atk} ダメージ (残りHP ${gameState.hp})`);
-
-      if (gameState.hp <= 0 || gameState.battle.turn >= 6) {
-        gameState.battle.log.push("敗北…ゲームオーバー。");
-        gameState.battle.resolved = true;
-        gameState.battle.won = false;
+      if (subPhase === "defeat") {
         gameState.phase = "gameover";
       }
       return;
@@ -185,6 +253,23 @@ function calcDamageBreakdown(grid, classBonus) {
     bonusDamage,
     totalDamage: baseDamage + bonusDamage
   };
+}
+
+function buildPlayerResultMessages(grid, totalDamage) {
+  const attackLines = grid
+    .filter((id) => id !== null)
+    .map((id) => {
+      const m = monsterById(id);
+      if (!m) return null;
+      return `${m.name}が${m.atk}ダメージ`;
+    })
+    .filter(Boolean);
+
+  return ["リール停止！", ...attackLines, `合計${totalDamage}ダメージ`];
+}
+
+function buildEnemyResultMessages(enemyAtk) {
+  return ["敵の攻撃！", `プレイヤーに${enemyAtk}ダメージ`];
 }
 
 function monsterById(id) {
@@ -353,6 +438,22 @@ function getEnemyAttackInfo(battleTurn) {
   return { frequency, targetRule, nextAttackTiming };
 }
 
+function getBattleContinueLabel(subPhase) {
+  if (subPhase === "victory") return "報酬へ進む";
+  if (subPhase === "defeat") return "結果へ";
+  return "次へ";
+}
+
+function getBattleStatusText(subPhase) {
+  if (subPhase === "idle") return "スピン待機中";
+  if (subPhase === "spinning") return "スピン中...";
+  if (subPhase === "player_result") return "プレイヤー攻撃結果";
+  if (subPhase === "enemy_result") return "敵行動結果";
+  if (subPhase === "victory") return "勝利！";
+  if (subPhase === "defeat") return "敗北...";
+  return "";
+}
+
 function renderBattleGridCells() {
   return gameState.battle.visibleGrid
     .map((id) => {
@@ -374,14 +475,21 @@ function renderBattleLogPanel() {
 }
 
 function renderBattleCenterPanel() {
+  const canSpin = gameState.battle.subPhase === "idle";
+  const showContinue = gameState.battle.awaitingContinue;
+  const continueLabel = getBattleContinueLabel(gameState.battle.subPhase);
+  const statusText = getBattleStatusText(gameState.battle.subPhase);
+
   return `
     <section class="panel battle-panel battle-center-panel">
       <h3>スロット（${gameState.battle.gridCols}x${gameState.battle.gridRows}）</h3>
+      <p class="muted">現在ステップ: ${statusText}</p>
       <div class="machine battle-machine-grid" style="--grid-cols:${gameState.battle.gridCols};">
         ${renderBattleGridCells()}
       </div>
       <div class="battle-action-row">
-        <button class="btn-primary battle-spin-btn" data-act="spin">スピンして攻撃</button>
+        <button class="btn-primary battle-spin-btn" data-act="spin" ${canSpin ? "" : "disabled"}>スピンして攻撃</button>
+        ${showContinue ? `<button class="btn-secondary battle-next-btn" data-act="battle-next">${continueLabel}</button>` : ""}
       </div>
     </section>
   `;
@@ -428,6 +536,10 @@ function renderBattleSummaryPanel() {
 
 function renderBattlePhase() {
   const classBonusLabel = getClassBonusLabel(gameState.classBonus);
+  const currentStepMessage =
+    gameState.battle.stepIndex >= 0 && gameState.battle.stepMessages[gameState.battle.stepIndex]
+      ? gameState.battle.stepMessages[gameState.battle.stepIndex]
+      : "スピンして戦闘を進行してください。";
   app.innerHTML = `
     <div class="phase-root battle-screen">
       <div class="topbar">
@@ -439,6 +551,9 @@ function renderBattlePhase() {
           <div class="badge">クラス効果: ${classBonusLabel}</div>
         </div>
       </div>
+      <section class="panel battle-step-panel battle-step-${gameState.battle.subPhase}">
+        ${currentStepMessage}
+      </section>
 
       <div class="battle-layout battle-layout-3col">
         <aside class="battle-col battle-col-left">
@@ -458,6 +573,10 @@ function renderBattlePhase() {
 
   app.querySelector("[data-act='spin']")?.addEventListener("click", () => {
     update("spin");
+    render();
+  });
+  app.querySelector("[data-act='battle-next']")?.addEventListener("click", () => {
+    update("battleNext");
     render();
   });
 }
