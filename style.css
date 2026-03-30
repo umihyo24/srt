@@ -488,4 +488,8 @@ button {
   .battle-summary-grid {
     grid-template-columns: 1fr;
   }
+
+  .battle-turn-result-grid {
+    grid-template-columns: 1fr;
+  }
 }

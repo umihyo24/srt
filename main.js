@@ -573,6 +573,12 @@ function renderBuildPhase() {
 
         <aside class="phase-root">
           <section class="panel">
+            <h3>現在の職業</h3>
+            <p><strong>${classInfo.name}</strong></p>
+            <p class="muted">${classInfo.desc}</p>
+          </section>
+
+          <section class="panel">
             <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
             ${
               pendingMonster
