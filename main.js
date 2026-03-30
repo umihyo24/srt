@@ -15,6 +15,7 @@ const INITIAL_STATE = () => ({
   round: 1,
   coins: 12,
   hp: 12,
+  buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
   selectedMonsterId: null,
   pendingPlacement: null,
@@ -44,9 +45,19 @@ const app = document.getElementById("app");
 
 function update(action, payload = {}) {
   switch (action) {
-    case "selectShopMonster": {
-      gameState.selectedMonsterId = payload.monsterId;
-      gameState.buildStatus = { type: "info", text: "モンスターを購入してリールに配置します" };
+    case "setBuildManualPlacement": {
+      if (gameState.phase !== "build") return;
+      gameState.buildManualPlacement = Boolean(payload.enabled);
+      if (!gameState.buildManualPlacement && gameState.pendingPlacement) {
+        gameState.buildStatus = { type: "warn", text: "配置待ちモンスターを先に配置してください" };
+      } else {
+        gameState.buildStatus = {
+          type: "info",
+          text: gameState.buildManualPlacement
+            ? "手動配置モード: 購入後に配置先を選択します"
+            : "モンスターを購入してリールに配置します"
+        };
+      }
       return;
     }
     case "buyMonster": {
@@ -60,10 +71,23 @@ function update(action, payload = {}) {
         gameState.buildStatus = { type: "warn", text: "コインが不足しています" };
         return;
       }
-      gameState.coins -= monster.cost;
-      gameState.pendingPlacement = monster.id;
       gameState.selectedMonsterId = monster.id;
-      gameState.buildStatus = { type: "info", text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください` };
+      if (gameState.buildManualPlacement) {
+        gameState.coins -= monster.cost;
+        gameState.pendingPlacement = monster.id;
+        gameState.buildStatus = { type: "info", text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください` };
+        return;
+      }
+
+      const emptyIndex = getFirstEmptyVisualSlotIndex(gameState.reels);
+      if (emptyIndex === -1) {
+        gameState.buildStatus = { type: "warn", text: "空きスロットがありません。手動配置を有効にするか、スロットを空けてください" };
+        return;
+      }
+
+      gameState.coins -= monster.cost;
+      gameState.reels[emptyIndex] = monster.id;
+      gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
       return;
     }
     case "placePendingMonster": {
@@ -205,6 +229,21 @@ function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
   });
 }
 
+function getVisualSlotIndices() {
+  const indices = [];
+  for (let col = 0; col < 3; col += 1) {
+    for (let row = 0; row < 6; row += 1) {
+      indices.push(row * 3 + col);
+    }
+  }
+  return indices;
+}
+
+function getFirstEmptyVisualSlotIndex(reels) {
+  const visualOrder = getVisualSlotIndices();
+  return visualOrder.find((idx) => reels[idx] === null) ?? -1;
+}
+
 function spinVisibleGrid(reels) {
   const reelWindows = Array.from({ length: 3 }, (_, reelIndex) => {
     const strip = getReelStrip(reels, reelIndex);
@@ -318,6 +357,10 @@ function renderBuildPhase() {
         <div class="phase-root">
           <section class="panel">
             <h3>ショップ</h3>
+            <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+              <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
+              配置先を選ぶ（手動配置）
+            </label>
             <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
               ${buildStatus.text}
             </div>
@@ -327,7 +370,6 @@ function renderBuildPhase() {
                 <article class="card ${m.cls}">
                   <h4>${m.name}</h4>
                   <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
-                  <button class="small btn-secondary" data-act="select" data-mid="${m.id}">選択</button>
                   <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
               ).join("")}
@@ -392,11 +434,10 @@ function renderBuildPhase() {
 }
 
 function bindBuildEvents() {
-  app.querySelectorAll("[data-act='select']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      update("selectShopMonster", { monsterId: btn.dataset.mid });
-      render();
-    });
+  app.querySelector("[data-act='toggle-manual']")?.addEventListener("change", (event) => {
+    const checked = Boolean(event.target?.checked);
+    update("setBuildManualPlacement", { enabled: checked });
+    render();
   });
 
   app.querySelectorAll("[data-act='buy']").forEach((btn) => {
