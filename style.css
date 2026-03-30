@@ -235,6 +235,45 @@ button {
   background: linear-gradient(180deg, #361923, #2b121a);
 }
 
+.battle-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 20, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.battle-result-modal {
+  width: min(760px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+  border-color: #3d69a1;
+}
+
+.result-section {
+  background: #0b1a32;
+  border: 1px solid #2a4b75;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.result-section h4 {
+  margin: 0 0 8px;
+}
+
+.result-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.battle-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .log {
   max-height: 220px;
   overflow: auto;
