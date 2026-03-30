@@ -94,8 +94,17 @@ button {
 /* Build phase */
 .build-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(680px, 2.4fr) minmax(300px, 1fr);
   gap: 14px;
+  align-items: start;
+}
+
+.build-header {
+  justify-content: flex-start;
+}
+
+.build-main-stats {
+  margin-top: 8px;
 }
 
 .shop-grid {
@@ -199,6 +208,15 @@ button {
   justify-content: space-between;
   align-items: center;
   margin-top: 8px;
+}
+
+.build-start-panel {
+  text-align: center;
+}
+
+.build-start-btn {
+  width: min(360px, 100%);
+  margin-top: 6px;
 }
 
 /* Battle phase */

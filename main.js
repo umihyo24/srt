@@ -491,12 +491,14 @@ function renderBuildPhase() {
 
   app.innerHTML = `
     <div class="phase-root">
-      <div class="topbar">
-        <h2>ビルドフェーズ（ショップ＆リール編集）</h2>
-        <div class="badges">
-          <div class="badge">ラウンド ${gameState.round}</div>
-          <div class="badge">コイン ${gameState.coins}</div>
-          <div class="badge">HP ${gameState.hp}</div>
+      <div class="topbar build-header">
+        <div>
+          <h2>ビルドフェーズ（ショップ＆リール編集）</h2>
+          <div class="badges build-main-stats">
+            <div class="badge">ラウンド ${gameState.round}</div>
+            <div class="badge">コイン ${gameState.coins}</div>
+            <div class="badge">HP ${gameState.hp}</div>
+          </div>
         </div>
       </div>
 
@@ -556,6 +558,17 @@ function renderBuildPhase() {
                 .join("")}
             </div>
           </section>
+
+          <section class="panel build-start-panel">
+            <h3>次のステップ</h3>
+            <p class="muted">ビルドがまとまったら、次のバトルへ進みます。</p>
+            <button class="btn-primary build-start-btn" data-act="start" ${pendingMonster ? "disabled" : ""}>勝ちに行く</button>
+            ${
+              pendingMonster
+                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
+                : ""
+            }
+          </section>
         </div>
 
         <aside class="phase-root">
@@ -585,15 +598,16 @@ function renderBuildPhase() {
           </section>
 
           <section class="panel">
+            <h3>現在の職業</h3>
+            <p><strong>${classInfo.name}</strong></p>
+            <p class="muted">${classInfo.desc}</p>
+          </section>
+
+          <section class="panel">
             <h3>次のバトル情報</h3>
             <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
             <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
-            <button class="btn-primary" style="width:100%;margin-top:10px;" data-act="start" ${pendingMonster ? "disabled" : ""}>Start Battle</button>
-            ${
-              pendingMonster
-                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
-                : ""
-            }
+            <p class="muted" style="margin-top:8px;">準備ができたら左側の「勝ちに行く」から出撃。</p>
           </section>
         </aside>
       </div>
