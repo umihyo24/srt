@@ -18,6 +18,10 @@ const INITIAL_STATE = () => ({
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
   selectedMonsterId: null,
+  selectedSource: null, // shop | reel | null
+  selectedSlotIndex: null,
+  swapMode: false,
+  swapSourceIndex: null,
   pendingPlacement: null,
   classBonus: null,
   reels: Array(18).fill(null),
@@ -67,9 +71,32 @@ function update(action, payload = {}) {
       }
       return;
     }
+    case "selectShopMonster": {
+      if (gameState.phase !== "build") return;
+      const monster = MONSTERS.find((m) => m.id === payload.monsterId);
+      if (!monster) return;
+      gameState.selectedMonsterId = monster.id;
+      gameState.selectedSource = "shop";
+      gameState.selectedSlotIndex = null;
+      return;
+    }
+    case "selectReelSlot": {
+      if (gameState.phase !== "build") return;
+      const idx = payload.index;
+      if (idx < 0 || idx >= gameState.reels.length) return;
+      const id = gameState.reels[idx];
+      if (!id) return;
+      gameState.selectedMonsterId = id;
+      gameState.selectedSource = "reel";
+      gameState.selectedSlotIndex = idx;
+      return;
+    }
     case "buyMonster": {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster || gameState.phase !== "build") return;
+      gameState.selectedMonsterId = monster.id;
+      gameState.selectedSource = "shop";
+      gameState.selectedSlotIndex = null;
       if (gameState.pendingPlacement !== null) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
@@ -117,6 +144,66 @@ function update(action, payload = {}) {
       const idx = payload.index;
       if (idx < 0 || idx >= gameState.reels.length) return;
       gameState.reels[idx] = null;
+      return;
+    }
+    case "sellSelectedMonster": {
+      if (gameState.phase !== "build") return;
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      const idx = gameState.selectedSlotIndex;
+      const monsterId = gameState.reels[idx];
+      if (!monsterId) return;
+      const monster = monsterById(monsterId);
+      if (!monster) return;
+      const sellValue = Math.floor(monster.cost / 2);
+      gameState.coins += sellValue;
+      gameState.reels[idx] = null;
+      gameState.selectedMonsterId = null;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
+      gameState.buildStatus = { type: "info", text: `${monster.name}を売却。コイン+${sellValue}` };
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      return;
+    }
+    case "startSwap": {
+      if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) {
+        gameState.buildStatus = { type: "warn", text: "配置待ち中は入れ替えできません" };
+        return;
+      }
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      gameState.swapMode = true;
+      gameState.swapSourceIndex = gameState.selectedSlotIndex;
+      gameState.buildStatus = { type: "info", text: "入れ替え先のスロットを選んでください" };
+      return;
+    }
+    case "cancelSwap": {
+      if (gameState.phase !== "build") return;
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      gameState.buildStatus = { type: "info", text: "入れ替えをキャンセルしました" };
+      return;
+    }
+    case "swapSlotWithSource": {
+      if (gameState.phase !== "build" || !gameState.swapMode) return;
+      const targetIndex = payload.index;
+      const sourceIndex = gameState.swapSourceIndex;
+      if (sourceIndex === null || targetIndex < 0 || targetIndex >= gameState.reels.length) return;
+      if (targetIndex === sourceIndex) return;
+      [gameState.reels[sourceIndex], gameState.reels[targetIndex]] = [gameState.reels[targetIndex], gameState.reels[sourceIndex]];
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
+      const movedMonsterId = gameState.reels[targetIndex];
+      if (movedMonsterId) {
+        gameState.selectedMonsterId = movedMonsterId;
+        gameState.selectedSource = "reel";
+        gameState.selectedSlotIndex = targetIndex;
+      } else {
+        gameState.selectedMonsterId = null;
+        gameState.selectedSource = null;
+        gameState.selectedSlotIndex = null;
+      }
       return;
     }
     case "startBattle": {
@@ -375,6 +462,8 @@ function getBuildStatusDisplay() {
 
 function renderBuildPhase() {
   const selected = monsterById(gameState.selectedMonsterId);
+  const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
+  const selectedSellValue = selected ? Math.floor(selected.cost / 2) : 0;
   const pendingMonster = monsterById(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
@@ -404,7 +493,9 @@ function renderBuildPhase() {
             <div class="shop-grid">
               ${MONSTERS.map(
                 (m) => `
-                <article class="card ${m.cls}">
+                <article class="card ${m.cls} ${
+                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === m.id ? "build-selected-shop" : ""
+                }" data-act="select-shop" data-mid="${m.id}">
                   <h4>${m.name}</h4>
                   <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
                   <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
@@ -425,10 +516,15 @@ function renderBuildPhase() {
                     .map((id, rowIdx) => {
                       const absoluteIndex = rowIdx * 3 + colIdx;
                       const monster = monsterById(id);
+                      const isSelectedSlot =
+                        gameState.selectedSource === "reel" && gameState.selectedSlotIndex === absoluteIndex;
+                      const isSwapSource = gameState.swapMode && gameState.swapSourceIndex === absoluteIndex;
                       return `<div class="slot" data-act="slot" data-index="${absoluteIndex}" ${
                         pendingMonster ? 'style="outline:2px solid #ffcc7a;cursor:pointer;"' : ""
                       }>
-                        ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
+                        <div class="${isSelectedSlot ? "build-selected-slot" : ""} ${isSwapSource ? "build-swap-source" : ""}" style="width:100%;padding:2px;border-radius:8px;">
+                          ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
+                        </div>
                       </div>`;
                     })
                     .join("")}
@@ -446,7 +542,22 @@ function renderBuildPhase() {
               pendingMonster
                 ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
                 : selected
-                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div><p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>`
+                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div>
+                    <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
+                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "リールスロット"}</p>
+                    ${isReelSelection ? `<p>売却価格 ${selectedSellValue}</p>` : ""}
+                    ${
+                      isReelSelection
+                        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="small btn-danger" data-act="sell-selected">売却</button>
+                            ${
+                              gameState.swapMode
+                                ? '<button class="small btn-secondary" data-act="cancel-swap">入れ替えキャンセル</button>'
+                                : '<button class="small btn-secondary" data-act="start-swap">入れ替え開始</button>'
+                            }
+                          </div>`
+                        : ""
+                    }`
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
@@ -484,16 +595,39 @@ function bindBuildEvents() {
     });
   });
 
+  app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target?.closest("[data-act='buy']")) return;
+      update("selectShopMonster", { monsterId: card.dataset.mid });
+      render();
+    });
+  });
+
   app.querySelectorAll("[data-act='slot']").forEach((slot) => {
     slot.addEventListener("click", () => {
       const slotIndex = Number(slot.dataset.index);
       if (gameState.pendingPlacement !== null) {
         update("placePendingMonster", { index: slotIndex });
-      } else {
-        update("clearSlot", { index: slotIndex });
+      } else if (gameState.swapMode) {
+        update("swapSlotWithSource", { index: slotIndex });
+      } else if (gameState.reels[slotIndex]) {
+        update("selectReelSlot", { index: slotIndex });
       }
       render();
     });
+  });
+
+  app.querySelector("[data-act='sell-selected']")?.addEventListener("click", () => {
+    update("sellSelectedMonster");
+    render();
+  });
+  app.querySelector("[data-act='start-swap']")?.addEventListener("click", () => {
+    update("startSwap");
+    render();
+  });
+  app.querySelector("[data-act='cancel-swap']")?.addEventListener("click", () => {
+    update("cancelSwap");
+    render();
   });
 
   const startBtn = app.querySelector("[data-act='start']");
