@@ -163,18 +163,57 @@ button {
 /* Battle phase */
 .battle-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
   gap: 14px;
 }
 
 .machine {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
 .machine .slot {
   min-height: 86px;
+}
+
+.battle-screen .topbar {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.battle-layout-3col {
+  grid-template-columns: minmax(240px, 280px) minmax(420px, 1fr) minmax(240px, 300px);
+  align-items: stretch;
+}
+
+.battle-col {
+  min-width: 0;
+}
+
+.battle-panel {
+  height: 100%;
+}
+
+.battle-center-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+}
+
+.battle-machine-grid {
+  grid-template-columns: repeat(var(--grid-cols, 3), minmax(92px, 1fr));
+}
+
+.battle-cell {
+  min-height: 96px;
+}
+
+.battle-action-row {
+  display: flex;
+  justify-content: center;
+}
+
+.battle-spin-btn {
+  min-width: 220px;
 }
 
 .log {
@@ -195,6 +234,36 @@ button {
 
 .log-entry:last-child {
   border-bottom: 0;
+}
+
+.battle-summary-panel {
+  padding-top: 10px;
+  border-color: #2f5d8d;
+  box-shadow: inset 0 0 0 1px rgba(53, 112, 173, 0.25);
+}
+
+.battle-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card {
+  background: #0b1a32;
+  border: 1px solid #2d4f7a;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.6rem;
+}
+
+.summary-total {
+  border-color: #7a4b16;
+  background: linear-gradient(180deg, #3a2410, #2a1b0e);
 }
 
 /* Reward + gameover */
@@ -227,6 +296,10 @@ button {
   }
 
   .shop-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-summary-grid {
     grid-template-columns: 1fr;
   }
 }

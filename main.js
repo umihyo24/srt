@@ -24,6 +24,9 @@ const INITIAL_STATE = () => ({
     turn: 0,
     enemyHp: 10,
     visibleGrid: Array(9).fill(null),
+    gridCols: 3,
+    gridRows: 3,
+    lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
     log: [],
     resolved: false,
     won: null
@@ -73,6 +76,9 @@ function update(action, payload = {}) {
         turn: 0,
         enemyHp: gameState.enemy.hp,
         visibleGrid: spinVisibleGrid(gameState.reels),
+        gridCols: 3,
+        gridRows: 3,
+        lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
         resolved: false,
         won: null
@@ -83,7 +89,9 @@ function update(action, payload = {}) {
       if (gameState.phase !== "battle" || gameState.battle.resolved) return;
       gameState.battle.turn += 1;
       gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
-      const dmg = calcDamage(gameState.battle.visibleGrid, gameState.classBonus);
+      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classBonus);
+      const dmg = damageBreakdown.totalDamage;
+      gameState.battle.lastDamage = damageBreakdown;
       gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
       gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計 ${dmg} ダメージ`);
 
@@ -143,20 +151,26 @@ function spinVisibleGrid(reels) {
   });
 }
 
-function calcDamage(grid, classBonus) {
-  let dmg = 0;
+function calcDamageBreakdown(grid, classBonus) {
+  let baseDamage = 0;
+  let bonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
   grid.forEach((id) => {
     if (!id) return;
     const m = MONSTERS.find((x) => x.id === id);
     if (!m) return;
-    dmg += m.atk;
+    baseDamage += m.atk;
     counts[id] += 1;
   });
 
-  if (classBonus === "slime_master" && counts.slime >= 3) dmg += 1;
-  if (classBonus === "necromancer") dmg += counts.skeleton + counts.zombie;
-  return dmg;
+  if (classBonus === "slime_master" && counts.slime >= 3) bonusDamage += 1;
+  if (classBonus === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+
+  return {
+    baseDamage,
+    bonusDamage,
+    totalDamage: baseDamage + bonusDamage
+  };
 }
 
 function monsterById(id) {
@@ -311,49 +325,120 @@ function bindBuildEvents() {
   });
 }
 
+function getClassBonusLabel(classBonus) {
+  if (classBonus === "slime_master") return "スライムマスター（スライム3体以上で+1）";
+  if (classBonus === "necromancer") return "ネクロマンサー（不死系攻撃+1/体）";
+  if (classBonus === "beast_tamer") return "ビーストテイマー（次ラウンド開始時コイン+2）";
+  return "なし";
+}
+
+function getEnemyAttackInfo(battleTurn) {
+  const frequency = "毎ターン";
+  const targetRule = "プレイヤーを直接攻撃";
+  const nextAttackTiming = battleTurn >= 0 ? `ターン ${battleTurn + 1} 終了時` : "次ターン";
+  return { frequency, targetRule, nextAttackTiming };
+}
+
+function renderBattleGridCells() {
+  return gameState.battle.visibleGrid
+    .map((id) => {
+      const m = monsterById(id);
+      return `<div class="slot battle-cell">${m ? `<div class="monster-chip ${m.cls}">${m.name}</div>` : "-"}</div>`;
+    })
+    .join("");
+}
+
+function renderBattleLogPanel() {
+  return `
+    <section class="panel battle-panel">
+      <h3>バトルログ</h3>
+      <div class="log">
+        ${gameState.battle.log.map((l) => `<div class="log-entry">${l}</div>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderBattleCenterPanel() {
+  return `
+    <section class="panel battle-panel battle-center-panel">
+      <h3>スロット（${gameState.battle.gridCols}x${gameState.battle.gridRows}）</h3>
+      <div class="machine battle-machine-grid" style="--grid-cols:${gameState.battle.gridCols};">
+        ${renderBattleGridCells()}
+      </div>
+      <div class="battle-action-row">
+        <button class="btn-primary battle-spin-btn" data-act="spin">スピンして攻撃</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderEnemyInfoPanel() {
+  const attackInfo = getEnemyAttackInfo(gameState.battle.turn);
+  return `
+    <section class="panel battle-panel">
+      <h3>敵情報</h3>
+      <p><strong>名前:</strong> ${gameState.enemy.name}</p>
+      <p><strong>現在HP:</strong> ${gameState.battle.enemyHp}</p>
+      <p><strong>攻撃値:</strong> ${gameState.enemy.atk}</p>
+      <p><strong>攻撃頻度:</strong> ${attackInfo.frequency}</p>
+      <p><strong>対象ルール:</strong> ${attackInfo.targetRule}</p>
+      <p><strong>次の攻撃:</strong> ${attackInfo.nextAttackTiming}</p>
+      <p class="muted">※ 現在は簡易AI。将来的に対象選択ロジックを拡張予定。</p>
+    </section>
+  `;
+}
+
+function renderBattleSummaryPanel() {
+  const { baseDamage, bonusDamage, totalDamage } = gameState.battle.lastDamage;
+  return `
+    <section class="panel battle-summary-panel">
+      <h3>ダメージサマリー（前回スピン）</h3>
+      <div class="battle-summary-grid">
+        <div class="summary-card">
+          <div class="muted">基礎ダメージ</div>
+          <strong>${baseDamage}</strong>
+        </div>
+        <div class="summary-card">
+          <div class="muted">クラスボーナス</div>
+          <strong>${bonusDamage}</strong>
+        </div>
+        <div class="summary-card summary-total">
+          <div class="muted">合計ダメージ</div>
+          <strong>${totalDamage}</strong>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderBattlePhase() {
+  const classBonusLabel = getClassBonusLabel(gameState.classBonus);
   app.innerHTML = `
-    <div class="phase-root">
+    <div class="phase-root battle-screen">
       <div class="topbar">
         <h2>バトルフェーズ（スロットバトル）</h2>
         <div class="badges">
+          <div class="badge">ターン ${gameState.battle.turn}</div>
           <div class="badge">プレイヤーHP ${gameState.hp}</div>
           <div class="badge">敵HP ${gameState.battle.enemyHp}</div>
-          <div class="badge">ターン ${gameState.battle.turn}</div>
+          <div class="badge">クラス効果: ${classBonusLabel}</div>
         </div>
       </div>
 
-      <div class="battle-layout">
-        <div class="phase-root">
-          <section class="panel">
-            <h3>スロット（3x3）</h3>
-            <div class="machine">
-              ${gameState.battle.visibleGrid
-                .map((id) => {
-                  const m = monsterById(id);
-                  return `<div class="slot">${m ? `<div class="monster-chip ${m.cls}">${m.name}</div>` : "-"}</div>`;
-                })
-                .join("")}
-            </div>
-            <button class="btn-primary" style="margin-top:10px" data-act="spin">スピンして攻撃</button>
-          </section>
-
-          <section class="panel">
-            <h3>バトルログ</h3>
-            <div class="log">
-              ${gameState.battle.log.map((l) => `<div class="log-entry">${l}</div>`).join("")}
-            </div>
-          </section>
-        </div>
-
-        <aside class="panel">
-          <h3>敵情報</h3>
-          <p>${gameState.enemy.name}</p>
-          <p>HP: ${gameState.battle.enemyHp}</p>
-          <p>攻撃: ${gameState.enemy.atk}</p>
-          <p class="muted">※ このフェーズにはショップ・リール編集UIは表示されません。</p>
+      <div class="battle-layout battle-layout-3col">
+        <aside class="battle-col battle-col-left">
+          ${renderBattleLogPanel()}
+        </aside>
+        <main class="battle-col battle-col-center">
+          ${renderBattleCenterPanel()}
+        </main>
+        <aside class="battle-col battle-col-right">
+          ${renderEnemyInfoPanel()}
         </aside>
       </div>
+
+      ${renderBattleSummaryPanel()}
     </div>
   `;
 
