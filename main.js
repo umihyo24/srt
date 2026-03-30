@@ -151,6 +151,66 @@ function update(action, payload = {}) {
       gameState.reels[idx] = null;
       return;
     }
+    case "sellSelectedMonster": {
+      if (gameState.phase !== "build") return;
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      const idx = gameState.selectedSlotIndex;
+      const monsterId = gameState.reels[idx];
+      if (!monsterId) return;
+      const monster = monsterById(monsterId);
+      if (!monster) return;
+      const sellValue = Math.floor(monster.cost / 2);
+      gameState.coins += sellValue;
+      gameState.reels[idx] = null;
+      gameState.selectedMonsterId = null;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
+      gameState.buildStatus = { type: "info", text: `${monster.name}を売却。コイン+${sellValue}` };
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      return;
+    }
+    case "startSwap": {
+      if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) {
+        gameState.buildStatus = { type: "warn", text: "配置待ち中は入れ替えできません" };
+        return;
+      }
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      gameState.swapMode = true;
+      gameState.swapSourceIndex = gameState.selectedSlotIndex;
+      gameState.buildStatus = { type: "info", text: "入れ替え先のスロットを選んでください" };
+      return;
+    }
+    case "cancelSwap": {
+      if (gameState.phase !== "build") return;
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      gameState.buildStatus = { type: "info", text: "入れ替えをキャンセルしました" };
+      return;
+    }
+    case "swapSlotWithSource": {
+      if (gameState.phase !== "build" || !gameState.swapMode) return;
+      const targetIndex = payload.index;
+      const sourceIndex = gameState.swapSourceIndex;
+      if (sourceIndex === null || targetIndex < 0 || targetIndex >= gameState.reels.length) return;
+      if (targetIndex === sourceIndex) return;
+      [gameState.reels[sourceIndex], gameState.reels[targetIndex]] = [gameState.reels[targetIndex], gameState.reels[sourceIndex]];
+      gameState.swapMode = false;
+      gameState.swapSourceIndex = null;
+      gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
+      const movedMonsterId = gameState.reels[targetIndex];
+      if (movedMonsterId) {
+        gameState.selectedMonsterId = movedMonsterId;
+        gameState.selectedSource = "reel";
+        gameState.selectedSlotIndex = targetIndex;
+      } else {
+        gameState.selectedMonsterId = null;
+        gameState.selectedSource = null;
+        gameState.selectedSlotIndex = null;
+      }
+      return;
+    }
     case "startBattle": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement !== null) {
@@ -545,6 +605,19 @@ function bindBuildEvents() {
       }
       render();
     });
+  });
+
+  app.querySelector("[data-act='sell-selected']")?.addEventListener("click", () => {
+    update("sellSelectedMonster");
+    render();
+  });
+  app.querySelector("[data-act='start-swap']")?.addEventListener("click", () => {
+    update("startSwap");
+    render();
+  });
+  app.querySelector("[data-act='cancel-swap']")?.addEventListener("click", () => {
+    update("cancelSwap");
+    render();
   });
 
   const startBtn = app.querySelector("[data-act='start']");
