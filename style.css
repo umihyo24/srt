@@ -212,11 +212,14 @@ button {
 
 .build-start-panel {
   text-align: center;
+  border-color: #3f8a4b;
+  box-shadow: inset 0 0 0 1px rgba(73, 208, 111, 0.25);
 }
 
 .build-start-btn {
   width: min(360px, 100%);
-  margin-top: 6px;
+  margin-top: 8px;
+  min-height: 44px;
 }
 
 /* Battle phase */

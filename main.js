@@ -560,8 +560,8 @@ function renderBuildPhase() {
           </section>
 
           <section class="panel build-start-panel">
-            <h3>次のステップ</h3>
-            <p class="muted">ビルドがまとまったら、次のバトルへ進みます。</p>
+            <h3>バトル開始</h3>
+            <p class="muted">準備ができたら次の戦闘へ。</p>
             <button class="btn-primary build-start-btn" data-act="start" ${pendingMonster ? "disabled" : ""}>勝ちに行く</button>
             ${
               pendingMonster
