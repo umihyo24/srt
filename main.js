@@ -30,6 +30,9 @@ const INITIAL_STATE = () => ({
     gridRows: 3,
     lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
     log: [],
+    logEntries: [],
+    compactTurnSummary: ["スピンして戦闘を開始してください。"],
+    showBattleLogModal: false,
     subPhase: "idle", // idle | spinning | enemy_result | victory | defeat
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
@@ -121,6 +124,9 @@ function update(action, payload = {}) {
         gridRows: 3,
         lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
+        logEntries: [],
+        compactTurnSummary: ["スピンして戦闘を開始してください。"],
+        showBattleLogModal: false,
         subPhase: "idle",
         turnResult: null,
         pendingOutcome: null,
@@ -159,6 +165,17 @@ function update(action, payload = {}) {
         totalDamage: dmg,
         outcome
       };
+      gameState.battle.logEntries.push({
+        turn: gameState.battle.turn,
+        playerActions,
+        enemyActions: enemyActions.length > 0 ? enemyActions : ["敵は力をためている"],
+        outcomeText: getBattleOutcomeText(outcome)
+      });
+      gameState.battle.compactTurnSummary = buildCompactTurnSummary({
+        totalDamage: dmg,
+        enemyAttack: enemyActions[0] || "敵は力をためている",
+        outcome
+      });
       gameState.battle.pendingOutcome = outcome;
       gameState.battle.requiresOutcomeConfirm = outcome === "victory" || outcome === "defeat";
       gameState.battle.subPhase = outcome === "victory" ? "victory" : outcome === "defeat" ? "defeat" : "enemy_result";
@@ -169,6 +186,16 @@ function update(action, payload = {}) {
         gameState.battle.subPhase = "idle";
         gameState.battle.pendingOutcome = null;
       }
+      return;
+    }
+    case "openBattleLog": {
+      if (gameState.phase !== "battle") return;
+      gameState.battle.showBattleLogModal = true;
+      return;
+    }
+    case "closeBattleLog": {
+      if (gameState.phase !== "battle") return;
+      gameState.battle.showBattleLogModal = false;
       return;
     }
     case "battleNext": {
@@ -489,6 +516,22 @@ function getBattleStatusText(subPhase) {
   return "";
 }
 
+function buildCompactTurnSummary({ totalDamage, enemyAttack, outcome }) {
+  const lines = ["味方の攻撃！", `合計${totalDamage}ダメージ`];
+  if (outcome === "victory") {
+    lines.push("戦闘に勝利した！");
+    return lines;
+  }
+  if (outcome === "defeat") {
+    lines.push(enemyAttack);
+    lines.push("プレイヤーは倒れた。");
+    return lines;
+  }
+  lines.push(enemyAttack);
+  lines.push("戦闘続行");
+  return lines;
+}
+
 function renderBattleGridCells() {
   return gameState.battle.visibleGrid
     .map((id) => {
@@ -498,14 +541,64 @@ function renderBattleGridCells() {
     .join("");
 }
 
-function renderBattleLogPanel() {
+function renderCompactBattleSummary() {
+  const summaryLines = gameState.battle.compactTurnSummary || [];
+  const isVictory = gameState.battle.pendingOutcome === "victory";
+  const isDefeat = gameState.battle.pendingOutcome === "defeat";
+  const summaryClass = isVictory ? "battle-compact-victory" : isDefeat ? "battle-compact-defeat" : "";
+
   return `
-    <section class="panel battle-panel">
-      <h3>バトルログ</h3>
-      <div class="log">
-        ${gameState.battle.log.map((l) => `<div class="log-entry">${l}</div>`).join("")}
-      </div>
+    <section class="panel battle-compact-summary ${summaryClass}">
+      <h3>バトル結果</h3>
+      <ul>
+        ${summaryLines.map((line) => `<li>${line}</li>`).join("")}
+      </ul>
+      ${
+        gameState.battle.requiresOutcomeConfirm
+          ? '<div class="battle-turn-result-actions"><button class="btn-secondary battle-next-btn" data-act="battle-next">次へ</button></div>'
+          : ""
+      }
     </section>
+  `;
+}
+
+function renderBattleLogModal() {
+  if (!gameState.battle.showBattleLogModal) return "";
+  const entries = gameState.battle.logEntries;
+  const entryHtml =
+    entries.length === 0
+      ? '<p class="muted">まだバトルログはありません。</p>'
+      : entries
+          .map(
+            (entry) => `
+          <article class="battle-log-turn">
+            <h4>ターン${entry.turn}</h4>
+            <div class="battle-log-group">
+              <strong>・プレイヤー</strong>
+              <ul>${entry.playerActions.map((line) => `<li>${line}</li>`).join("")}</ul>
+            </div>
+            <div class="battle-log-group">
+              <strong>・エネミー</strong>
+              <ul>${entry.enemyActions.map((line) => `<li>${line}</li>`).join("")}</ul>
+            </div>
+            <p class="battle-log-outcome">${entry.outcomeText}</p>
+          </article>
+        `
+          )
+          .join("");
+
+  return `
+    <div class="battle-modal-overlay">
+      <section class="panel battle-result-modal">
+        <div class="battle-log-modal-header">
+          <h3>バトルログ</h3>
+          <button class="small btn-secondary" data-act="close-battle-log">閉じる</button>
+        </div>
+        <div class="battle-log-modal-body">
+          ${entryHtml}
+        </div>
+      </section>
+    </div>
   `;
 }
 
@@ -522,7 +615,9 @@ function renderBattleCenterPanel() {
       </div>
       <div class="battle-action-row">
         <button class="btn-primary battle-spin-btn" data-act="spin" ${canSpin ? "" : "disabled"}>スピンして攻撃</button>
+        <button class="btn-secondary battle-next-btn" data-act="open-battle-log">バトルログ</button>
       </div>
+      ${renderCompactBattleSummary()}
     </section>
   `;
 }
@@ -543,88 +638,10 @@ function renderEnemyInfoPanel() {
   `;
 }
 
-function renderBattleSummaryPanel() {
-  const { baseDamage, bonusDamage, totalDamage } = gameState.battle.lastDamage;
-  return `
-    <section class="panel battle-summary-panel">
-      <h3>ダメージサマリー（前回スピン）</h3>
-      <div class="battle-summary-grid">
-        <div class="summary-card">
-          <div class="muted">基礎ダメージ</div>
-          <strong>${baseDamage}</strong>
-        </div>
-        <div class="summary-card">
-          <div class="muted">クラスボーナス</div>
-          <strong>${bonusDamage}</strong>
-        </div>
-        <div class="summary-card summary-total">
-          <div class="muted">合計ダメージ</div>
-          <strong>${totalDamage}</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
 function getBattleOutcomeText(outcome) {
   if (outcome === "victory") return "敵を倒した";
   if (outcome === "defeat") return "プレイヤーは倒れた";
   return "戦闘続行";
-}
-
-function renderBattleTurnResultPanel() {
-  const turnResult = gameState.battle.turnResult;
-  if (!turnResult) {
-    return `
-      <section class="panel battle-turn-result-panel">
-        <h3>ターン結果パネル</h3>
-        <p class="muted">スピンすると、このターンの詳細結果がここに表示されます。</p>
-      </section>
-    `;
-  }
-
-  const { playerActions, enemyActions, outcome, totalDamage } = turnResult;
-  const outcomeText = getBattleOutcomeText(outcome);
-  const requiresConfirm = gameState.battle.requiresOutcomeConfirm;
-  const continueLabel = getBattleContinueLabel(gameState.battle.subPhase);
-  const panelClass =
-    outcome === "victory"
-      ? "battle-turn-result-victory"
-      : outcome === "defeat"
-        ? "battle-turn-result-defeat"
-        : "battle-turn-result-continue";
-
-  const enemyActionLines = enemyActions.length > 0 ? enemyActions : ["敵は力をためている"];
-
-  return `
-    <section class="panel battle-turn-result-panel ${panelClass}">
-      <h3>ターン${gameState.battle.turn} の結果</h3>
-      <div class="battle-turn-result-grid">
-        <div class="result-section">
-          <h4>プレイヤーの攻撃</h4>
-          <ul>
-            ${playerActions.map((line) => `<li>${line}</li>`).join("")}
-            <li>このターンの合計ダメージ ${totalDamage}</li>
-          </ul>
-        </div>
-        <div class="result-section">
-          <h4>敵の行動</h4>
-          <ul>
-            ${enemyActionLines.map((line) => `<li>${line}</li>`).join("")}
-          </ul>
-        </div>
-        <div class="result-section">
-          <h4>結果</h4>
-          <ul><li>${outcomeText}</li></ul>
-        </div>
-      </div>
-      ${
-        requiresConfirm
-          ? `<div class="battle-turn-result-actions"><button class="btn-secondary battle-next-btn" data-act="battle-next">${continueLabel}</button></div>`
-          : ""
-      }
-    </section>
-  `;
 }
 
 function renderBattlePhase() {
@@ -641,10 +658,7 @@ function renderBattlePhase() {
         </div>
       </div>
 
-      <div class="battle-layout battle-layout-3col">
-        <aside class="battle-col battle-col-left">
-          ${renderBattleLogPanel()}
-        </aside>
+      <div class="battle-layout battle-layout-2col">
         <main class="battle-col battle-col-center">
           ${renderBattleCenterPanel()}
         </main>
@@ -653,8 +667,7 @@ function renderBattlePhase() {
         </aside>
       </div>
 
-      ${renderBattleSummaryPanel()}
-      ${renderBattleTurnResultPanel()}
+      ${renderBattleLogModal()}
     </div>
   `;
 
@@ -664,6 +677,14 @@ function renderBattlePhase() {
   });
   app.querySelector("[data-act='battle-next']")?.addEventListener("click", () => {
     update("battleNext");
+    render();
+  });
+  app.querySelector("[data-act='open-battle-log']")?.addEventListener("click", () => {
+    update("openBattleLog");
+    render();
+  });
+  app.querySelector("[data-act='close-battle-log']")?.addEventListener("click", () => {
+    update("closeBattleLog");
     render();
   });
 }

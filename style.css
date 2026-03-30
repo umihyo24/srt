@@ -211,6 +211,11 @@ button {
   align-items: stretch;
 }
 
+.battle-layout-2col {
+  grid-template-columns: minmax(480px, 1fr) minmax(240px, 300px);
+  align-items: stretch;
+}
+
 .battle-col {
   min-width: 0;
 }
@@ -278,16 +283,71 @@ button {
   padding-left: 20px;
 }
 
-.battle-turn-result-panel {
-  border-color: #4f77ac;
-  background: linear-gradient(180deg, #142947, #0f213a);
-  box-shadow: inset 0 0 0 1px rgba(90, 146, 214, 0.2);
+.battle-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 20, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 16px;
 }
 
-.battle-turn-result-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.battle-result-modal {
+  width: min(840px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+  border-color: #3d69a1;
+}
+
+.battle-log-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
+}
+
+.battle-log-modal-body {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.battle-log-turn {
+  border: 1px solid #2a4b75;
+  border-radius: 8px;
+  background: #0b1a32;
+  padding: 10px;
+}
+
+.battle-log-turn h4 {
+  margin: 0 0 8px;
+}
+
+.battle-log-group strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.battle-log-group ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.battle-log-outcome {
+  margin: 0;
+  color: #cde4ff;
+}
+
+.battle-compact-summary {
+  margin-top: 2px;
+  border-color: #3d6394;
+  background: linear-gradient(180deg, #112742, #0d1f35);
+}
+
+.battle-compact-summary ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 .battle-turn-result-actions {
@@ -296,12 +356,12 @@ button {
   margin-top: 8px;
 }
 
-.battle-turn-result-victory {
+.battle-compact-victory {
   border-color: #3f8a4b;
   background: linear-gradient(180deg, #173521, #122e1c);
 }
 
-.battle-turn-result-defeat {
+.battle-compact-defeat {
   border-color: #9a4560;
   background: linear-gradient(180deg, #3a1a25, #2d141d);
 }
