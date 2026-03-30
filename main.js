@@ -16,6 +16,7 @@ const INITIAL_STATE = () => ({
   coins: 12,
   hp: 12,
   selectedMonsterId: null,
+  pendingPlacement: null,
   classBonus: null,
   reels: Array(18).fill(null),
   enemy: { name: "ゴブリンウォーリア", hp: 10, atk: 2 },
@@ -40,12 +41,21 @@ function update(action, payload = {}) {
     }
     case "buyMonster": {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
-      if (!monster || gameState.coins < monster.cost || gameState.phase !== "build") return;
-      const emptyIndex = gameState.reels.findIndex((v) => v === null);
-      if (emptyIndex === -1) return;
+      if (!monster || gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) return;
+      if (gameState.coins < monster.cost) return;
       gameState.coins -= monster.cost;
-      gameState.reels[emptyIndex] = monster.id;
+      gameState.pendingPlacement = monster.id;
       gameState.selectedMonsterId = monster.id;
+      return;
+    }
+    case "placePendingMonster": {
+      if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement === null) return;
+      const idx = payload.index;
+      if (idx < 0 || idx >= gameState.reels.length) return;
+      gameState.reels[idx] = gameState.pendingPlacement;
+      gameState.pendingPlacement = null;
       return;
     }
     case "clearSlot": {
@@ -57,6 +67,7 @@ function update(action, payload = {}) {
     }
     case "startBattle": {
       if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) return;
       gameState.phase = "battle";
       gameState.battle = {
         turn: 0,
@@ -173,6 +184,7 @@ function render() {
 
 function renderBuildPhase() {
   const selected = monsterById(gameState.selectedMonsterId);
+  const pendingMonster = monsterById(gameState.pendingPlacement);
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
 
   app.innerHTML = `
@@ -190,6 +202,11 @@ function renderBuildPhase() {
         <div class="phase-root">
           <section class="panel">
             <h3>ショップ</h3>
+            ${
+              pendingMonster
+                ? `<p style="margin:0 0 10px;color:#ffcc7a;font-weight:700;">配置待ち: ${pendingMonster.name} を先に18スロットのどれかへ配置してください。</p>`
+                : ""
+            }
             <div class="shop-grid">
               ${MONSTERS.map(
                 (m) => `
@@ -197,7 +214,7 @@ function renderBuildPhase() {
                   <h4>${m.name}</h4>
                   <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
                   <button class="small btn-secondary" data-act="select" data-mid="${m.id}">選択</button>
-                  <button class="small btn-primary" data-act="buy" data-mid="${m.id}">購入</button>
+                  <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
               ).join("")}
             </div>
@@ -215,7 +232,9 @@ function renderBuildPhase() {
                     .map((id, rowIdx) => {
                       const absoluteIndex = rowIdx * 3 + colIdx;
                       const monster = monsterById(id);
-                      return `<div class="slot" data-act="clear" data-index="${absoluteIndex}">
+                      return `<div class="slot" data-act="slot" data-index="${absoluteIndex}" ${
+                        pendingMonster ? 'style="outline:2px solid #ffcc7a;cursor:pointer;"' : ""
+                      }>
                         ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
                       </div>`;
                     })
@@ -229,15 +248,26 @@ function renderBuildPhase() {
 
         <aside class="phase-root">
           <section class="panel">
-            <h3>選択中モンスター</h3>
-            ${selected ? `<div class="monster-chip ${selected.cls}">${selected.name}</div><p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>` : "<p class=\"muted\">未選択</p>"}
+            <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
+            ${
+              pendingMonster
+                ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
+                : selected
+                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div><p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>`
+                  : "<p class=\"muted\">未選択</p>"
+            }
           </section>
 
           <section class="panel">
             <h3>次のバトル情報</h3>
             <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
             <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
-            <button class="btn-primary" style="width:100%;margin-top:10px;" data-act="start">Start Battle</button>
+            <button class="btn-primary" style="width:100%;margin-top:10px;" data-act="start" ${pendingMonster ? "disabled" : ""}>Start Battle</button>
+            ${
+              pendingMonster
+                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
+                : ""
+            }
           </section>
         </aside>
       </div>
@@ -262,9 +292,14 @@ function bindBuildEvents() {
     });
   });
 
-  app.querySelectorAll("[data-act='clear']").forEach((slot) => {
+  app.querySelectorAll("[data-act='slot']").forEach((slot) => {
     slot.addEventListener("click", () => {
-      update("clearSlot", { index: Number(slot.dataset.index) });
+      const slotIndex = Number(slot.dataset.index);
+      if (gameState.pendingPlacement !== null) {
+        update("placePendingMonster", { index: slotIndex });
+      } else {
+        update("clearSlot", { index: slotIndex });
+      }
       render();
     });
   });
