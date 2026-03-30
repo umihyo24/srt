@@ -1,0 +1,232 @@
+:root {
+  --bg: #0a1020;
+  --panel: #101d33;
+  --panel-2: #132645;
+  --accent: #2aa8ff;
+  --accent-2: #8f6bff;
+  --good: #49d06f;
+  --warn: #ffb14a;
+  --danger: #ff5f7a;
+  --text: #e8f2ff;
+  --muted: #99b6d8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 20%, #1b2a52, var(--bg));
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.phase-root {
+  display: grid;
+  gap: 14px;
+}
+
+.topbar,
+.panel,
+.card,
+.slot,
+.choice {
+  border: 1px solid #2a4268;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.badges {
+  display: flex;
+  gap: 10px;
+}
+
+.badge {
+  background: #0a1730;
+  border: 1px solid #284a72;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #46c568, #2d9548);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: linear-gradient(180deg, #4a7bff, #2e4bcc);
+  color: #fff;
+}
+
+.btn-danger {
+  background: linear-gradient(180deg, #ff6e88, #c83f5b);
+  color: #fff;
+}
+
+.small {
+  padding: 7px 9px;
+  font-size: 0.85rem;
+}
+
+/* Build phase */
+.build-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.card {
+  padding: 10px;
+}
+
+.card h4,
+.panel h3 {
+  margin: 0 0 10px;
+}
+
+.stats {
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.reel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.reel-col {
+  display: grid;
+  gap: 6px;
+}
+
+.slot {
+  min-height: 56px;
+  padding: 6px;
+  display: grid;
+  place-items: center;
+  color: #9ac0ea;
+}
+
+.monster-chip {
+  width: 100%;
+  border-radius: 7px;
+  padding: 6px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }
+.m-skeleton { background: rgba(76, 122, 255, 0.22); border: 1px solid #5f7dff; }
+.m-zombie { background: rgba(153, 95, 255, 0.2); border: 1px solid #9e75ff; }
+
+.panel {
+  padding: 12px;
+}
+
+.next-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* Battle phase */
+.battle-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.machine {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.machine .slot {
+  min-height: 86px;
+}
+
+.log {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.93rem;
+  color: #d3e4fb;
+  background: #0a162c;
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid #224368;
+}
+
+.log-entry {
+  padding: 4px 0;
+  border-bottom: 1px dashed #244972;
+}
+
+.log-entry:last-child {
+  border-bottom: 0;
+}
+
+/* Reward + gameover */
+.center-phase {
+  max-width: 760px;
+  margin: 30px auto 0;
+  display: grid;
+  gap: 14px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.choice {
+  padding: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 920px) {
+  .build-layout,
+  .battle-layout,
+  .choices {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-grid {
+    grid-template-columns: 1fr;
+  }
+}
