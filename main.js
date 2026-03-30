@@ -138,17 +138,31 @@ function update(action, payload = {}) {
   }
 }
 
-function spinVisibleGrid(reels) {
-  return Array.from({ length: 9 }, (_, i) => {
-    const reelIndex = i % 3;
-    const reelItems = [];
-    for (let row = 0; row < 6; row += 1) {
-      const val = reels[row * 3 + reelIndex];
-      if (val) reelItems.push(val);
-    }
-    if (reelItems.length === 0) return null;
-    return reelItems[Math.floor(Math.random() * reelItems.length)];
+function getReelStrip(reels, reelIndex) {
+  return Array.from({ length: 6 }, (_, row) => reels[row * 3 + reelIndex] ?? null);
+}
+
+function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
+  return Array.from({ length: visibleRows }, (_, offset) => {
+    const idx = (stopIndex + offset) % strip.length;
+    return strip[idx];
   });
+}
+
+function spinVisibleGrid(reels) {
+  const reelWindows = Array.from({ length: 3 }, (_, reelIndex) => {
+    const strip = getReelStrip(reels, reelIndex);
+    const stopIndex = Math.floor(Math.random() * strip.length);
+    return getVisibleWindowFromStop(strip, stopIndex, 3);
+  });
+
+  const grid = [];
+  for (let row = 0; row < 3; row += 1) {
+    for (let reelIndex = 0; reelIndex < 3; reelIndex += 1) {
+      grid.push(reelWindows[reelIndex][row]);
+    }
+  }
+  return grid;
 }
 
 function calcDamageBreakdown(grid, classBonus) {
@@ -343,7 +357,7 @@ function renderBattleGridCells() {
   return gameState.battle.visibleGrid
     .map((id) => {
       const m = monsterById(id);
-      return `<div class="slot battle-cell">${m ? `<div class="monster-chip ${m.cls}">${m.name}</div>` : "-"}</div>`;
+      return `<div class="slot battle-cell">${m ? `<div class="monster-chip ${m.cls}">${m.name}</div>` : '<div class="muted">Empty</div>'}</div>`;
     })
     .join("");
 }
