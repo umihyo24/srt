@@ -30,11 +30,10 @@ const INITIAL_STATE = () => ({
     gridRows: 3,
     lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
     log: [],
-    subPhase: "idle", // idle | spinning | player_result | enemy_result | victory | defeat
-    showResultModal: false,
+    subPhase: "idle", // idle | spinning | enemy_result | victory | defeat
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
-    awaitingContinue: false,
+    requiresOutcomeConfirm: false,
     resolved: false,
     won: null
   }
@@ -123,10 +122,9 @@ function update(action, payload = {}) {
         lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
         subPhase: "idle",
-        showResultModal: false,
         turnResult: null,
         pendingOutcome: null,
-        awaitingContinue: false,
+        requiresOutcomeConfirm: false,
         resolved: false,
         won: null
       };
@@ -161,18 +159,21 @@ function update(action, payload = {}) {
         totalDamage: dmg,
         outcome
       };
-      gameState.battle.showResultModal = true;
       gameState.battle.pendingOutcome = outcome;
-      gameState.battle.awaitingContinue = true;
+      gameState.battle.requiresOutcomeConfirm = outcome === "victory" || outcome === "defeat";
       gameState.battle.subPhase = outcome === "victory" ? "victory" : outcome === "defeat" ? "defeat" : "enemy_result";
       gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計${dmg}ダメージ`);
       if (outcome === "victory") gameState.battle.log.push("敵を倒した。");
       if (outcome === "defeat") gameState.battle.log.push("プレイヤーは倒れた。");
+      if (outcome === "continue") {
+        gameState.battle.subPhase = "idle";
+        gameState.battle.pendingOutcome = null;
+      }
       return;
     }
     case "battleNext": {
       if (gameState.phase !== "battle") return;
-      if (!gameState.battle.awaitingContinue || !gameState.battle.showResultModal) return;
+      if (!gameState.battle.requiresOutcomeConfirm) return;
       if (gameState.battle.pendingOutcome === "victory") {
         gameState.battle.resolved = true;
         gameState.battle.won = true;
@@ -188,12 +189,6 @@ function update(action, payload = {}) {
         gameState.phase = "gameover";
         return;
       }
-
-      gameState.battle.showResultModal = false;
-      gameState.battle.turnResult = null;
-      gameState.battle.pendingOutcome = null;
-      gameState.battle.awaitingContinue = false;
-      gameState.battle.subPhase = "idle";
       return;
     }
     case "pickClass": {
@@ -229,18 +224,18 @@ function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
   });
 }
 
-function getVisualSlotIndices() {
-  const indices = [];
-  for (let col = 0; col < 3; col += 1) {
-    for (let row = 0; row < 6; row += 1) {
-      indices.push(row * 3 + col);
+function getVisualOrderIndices(cols, rows) {
+  const result = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      result.push(row * cols + col);
     }
   }
-  return indices;
+  return result;
 }
 
 function getFirstEmptyVisualSlotIndex(reels) {
-  const visualOrder = getVisualSlotIndices();
+  const visualOrder = getVisualOrderIndices(3, 6);
   return visualOrder.find((idx) => reels[idx] === null) ?? -1;
 }
 
@@ -481,8 +476,7 @@ function getEnemyAttackInfo(battleTurn) {
 }
 
 function getBattleContinueLabel(subPhase) {
-  if (subPhase === "victory") return "報酬へ進む";
-  if (subPhase === "defeat") return "結果へ";
+  if (subPhase === "victory" || subPhase === "defeat") return "次へ";
   return "次へ";
 }
 
@@ -572,17 +566,40 @@ function renderBattleSummaryPanel() {
   `;
 }
 
-function renderBattleResultModal() {
-  if (!gameState.battle.showResultModal || !gameState.battle.turnResult) return "";
-  const { playerActions, enemyActions, outcome, totalDamage } = gameState.battle.turnResult;
-  const outcomeText =
-    outcome === "victory" ? "敵を倒した" : outcome === "defeat" ? "プレイヤーは倒れた" : "戦闘続行";
+function getBattleOutcomeText(outcome) {
+  if (outcome === "victory") return "敵を倒した";
+  if (outcome === "defeat") return "プレイヤーは倒れた";
+  return "戦闘続行";
+}
+
+function renderBattleTurnResultPanel() {
+  const turnResult = gameState.battle.turnResult;
+  if (!turnResult) {
+    return `
+      <section class="panel battle-turn-result-panel">
+        <h3>ターン結果パネル</h3>
+        <p class="muted">スピンすると、このターンの詳細結果がここに表示されます。</p>
+      </section>
+    `;
+  }
+
+  const { playerActions, enemyActions, outcome, totalDamage } = turnResult;
+  const outcomeText = getBattleOutcomeText(outcome);
+  const requiresConfirm = gameState.battle.requiresOutcomeConfirm;
   const continueLabel = getBattleContinueLabel(gameState.battle.subPhase);
+  const panelClass =
+    outcome === "victory"
+      ? "battle-turn-result-victory"
+      : outcome === "defeat"
+        ? "battle-turn-result-defeat"
+        : "battle-turn-result-continue";
+
+  const enemyActionLines = enemyActions.length > 0 ? enemyActions : ["敵は力をためている"];
 
   return `
-    <div class="battle-modal-overlay">
-      <section class="panel battle-result-modal">
-        <h3>ターン${gameState.battle.turn} の結果</h3>
+    <section class="panel battle-turn-result-panel ${panelClass}">
+      <h3>ターン${gameState.battle.turn} の結果</h3>
+      <div class="battle-turn-result-grid">
         <div class="result-section">
           <h4>プレイヤーの攻撃</h4>
           <ul>
@@ -593,22 +610,20 @@ function renderBattleResultModal() {
         <div class="result-section">
           <h4>敵の行動</h4>
           <ul>
-            ${
-              enemyActions.length > 0
-                ? enemyActions.map((line) => `<li>${line}</li>`).join("")
-                : "<li>敵は行動できない。</li>"
-            }
+            ${enemyActionLines.map((line) => `<li>${line}</li>`).join("")}
           </ul>
         </div>
         <div class="result-section">
           <h4>結果</h4>
           <ul><li>${outcomeText}</li></ul>
         </div>
-        <div class="battle-modal-actions">
-          <button class="btn-secondary battle-next-btn" data-act="battle-next">${continueLabel}</button>
-        </div>
-      </section>
-    </div>
+      </div>
+      ${
+        requiresConfirm
+          ? `<div class="battle-turn-result-actions"><button class="btn-secondary battle-next-btn" data-act="battle-next">${continueLabel}</button></div>`
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -639,7 +654,7 @@ function renderBattlePhase() {
       </div>
 
       ${renderBattleSummaryPanel()}
-      ${renderBattleResultModal()}
+      ${renderBattleTurnResultPanel()}
     </div>
   `;
 
