@@ -15,6 +15,7 @@ const INITIAL_STATE = () => ({
   round: 1,
   coins: 12,
   hp: 12,
+  buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
   selectedMonsterId: null,
   pendingPlacement: null,
   classBonus: null,
@@ -45,16 +46,24 @@ function update(action, payload = {}) {
   switch (action) {
     case "selectShopMonster": {
       gameState.selectedMonsterId = payload.monsterId;
+      gameState.buildStatus = { type: "info", text: "モンスターを購入してリールに配置します" };
       return;
     }
     case "buyMonster": {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster || gameState.phase !== "build") return;
-      if (gameState.pendingPlacement !== null) return;
-      if (gameState.coins < monster.cost) return;
+      if (gameState.pendingPlacement !== null) {
+        gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
+        return;
+      }
+      if (gameState.coins < monster.cost) {
+        gameState.buildStatus = { type: "warn", text: "コインが不足しています" };
+        return;
+      }
       gameState.coins -= monster.cost;
       gameState.pendingPlacement = monster.id;
       gameState.selectedMonsterId = monster.id;
+      gameState.buildStatus = { type: "info", text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください` };
       return;
     }
     case "placePendingMonster": {
@@ -64,6 +73,7 @@ function update(action, payload = {}) {
       if (idx < 0 || idx >= gameState.reels.length) return;
       gameState.reels[idx] = gameState.pendingPlacement;
       gameState.pendingPlacement = null;
+      gameState.buildStatus = { type: "info", text: "モンスターを購入してリールに配置します" };
       return;
     }
     case "clearSlot": {
@@ -75,7 +85,10 @@ function update(action, payload = {}) {
     }
     case "startBattle": {
       if (gameState.phase !== "build") return;
-      if (gameState.pendingPlacement !== null) return;
+      if (gameState.pendingPlacement !== null) {
+        gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
+        return;
+      }
       gameState.phase = "battle";
       gameState.battle = {
         turn: 0,
@@ -271,9 +284,23 @@ function render() {
   }
 }
 
+function getBuildStatusDisplay() {
+  if (gameState.pendingPlacement) {
+    const monster = monsterById(gameState.pendingPlacement);
+    if (monster) {
+      return {
+        type: "info",
+        text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください`
+      };
+    }
+  }
+  return gameState.buildStatus || { type: "info", text: "モンスターを購入してリールに配置します" };
+}
+
 function renderBuildPhase() {
   const selected = monsterById(gameState.selectedMonsterId);
   const pendingMonster = monsterById(gameState.pendingPlacement);
+  const buildStatus = getBuildStatusDisplay();
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
 
   app.innerHTML = `
@@ -291,11 +318,9 @@ function renderBuildPhase() {
         <div class="phase-root">
           <section class="panel">
             <h3>ショップ</h3>
-            ${
-              pendingMonster
-                ? `<p style="margin:0 0 10px;color:#ffcc7a;font-weight:700;">配置待ち: ${pendingMonster.name} を先に18スロットのどれかへ配置してください。</p>`
-                : ""
-            }
+            <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
+              ${buildStatus.text}
+            </div>
             <div class="shop-grid">
               ${MONSTERS.map(
                 (m) => `
