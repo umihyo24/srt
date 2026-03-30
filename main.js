@@ -44,6 +44,11 @@ const INITIAL_STATE = () => ({
 
 const gameState = INITIAL_STATE();
 const app = document.getElementById("app");
+const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスターを購入してリールに配置します" });
+
+function resetBuildUiState() {
+  gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
+}
 
 function update(action, payload = {}) {
   switch (action) {
@@ -70,7 +75,12 @@ function update(action, payload = {}) {
         return;
       }
       if (gameState.coins < monster.cost) {
-        gameState.buildStatus = { type: "warn", text: "コインが不足しています" };
+        gameState.buildStatus = {
+          type: "warn",
+          text: "コインが不足しています",
+          code: "insufficient_coins",
+          requiredCoins: monster.cost
+        };
         return;
       }
       gameState.selectedMonsterId = monster.id;
@@ -224,6 +234,7 @@ function update(action, payload = {}) {
       if (!picked) return;
       gameState.classBonus = picked.id;
       gameState.phase = "build";
+      resetBuildUiState();
       gameState.enemy = {
         name: `ラウンド${gameState.round}の敵`,
         hp: 10 + gameState.round * 2,
@@ -346,6 +357,10 @@ function render() {
 }
 
 function getBuildStatusDisplay() {
+  const status = gameState.buildStatus || DEFAULT_BUILD_STATUS;
+  if (status.code === "insufficient_coins" && gameState.coins >= (status.requiredCoins ?? Infinity)) {
+    return { ...DEFAULT_BUILD_STATUS };
+  }
   if (gameState.pendingPlacement) {
     const monster = monsterById(gameState.pendingPlacement);
     if (monster) {
@@ -355,7 +370,7 @@ function getBuildStatusDisplay() {
       };
     }
   }
-  return gameState.buildStatus || { type: "info", text: "モンスターを購入してリールに配置します" };
+  return status;
 }
 
 function renderBuildPhase() {
