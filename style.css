@@ -1,0 +1,389 @@
+:root {
+  --bg: #0a1020;
+  --panel: #101d33;
+  --panel-2: #132645;
+  --accent: #2aa8ff;
+  --accent-2: #8f6bff;
+  --good: #49d06f;
+  --warn: #ffb14a;
+  --danger: #ff5f7a;
+  --text: #e8f2ff;
+  --muted: #99b6d8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 20%, #1b2a52, var(--bg));
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.phase-root {
+  display: grid;
+  gap: 14px;
+}
+
+.topbar,
+.panel,
+.card,
+.slot,
+.choice {
+  border: 1px solid #2a4268;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.badges {
+  display: flex;
+  gap: 10px;
+}
+
+.badge {
+  background: #0a1730;
+  border: 1px solid #284a72;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #46c568, #2d9548);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: linear-gradient(180deg, #4a7bff, #2e4bcc);
+  color: #fff;
+}
+
+.btn-danger {
+  background: linear-gradient(180deg, #ff6e88, #c83f5b);
+  color: #fff;
+}
+
+.small {
+  padding: 7px 9px;
+  font-size: 0.85rem;
+}
+
+/* Build phase */
+.build-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+}
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.build-status-bar {
+  min-height: 40px;
+  max-height: 40px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #335a86;
+  background: #0b1a32;
+  display: flex;
+  align-items: center;
+  font-size: 0.93rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.build-status-info {
+  color: #cde4ff;
+}
+
+.build-status-warn {
+  color: #ffd088;
+  border-color: #8a6a35;
+  background: #2c2111;
+}
+
+.card {
+  padding: 10px;
+}
+
+.card h4,
+.panel h3 {
+  margin: 0 0 10px;
+}
+
+.stats {
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.reel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.reel-col {
+  display: grid;
+  gap: 6px;
+}
+
+.slot {
+  min-height: 56px;
+  padding: 6px;
+  display: grid;
+  place-items: center;
+  color: #9ac0ea;
+}
+
+.monster-chip {
+  width: 100%;
+  border-radius: 7px;
+  padding: 6px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }
+.m-skeleton { background: rgba(76, 122, 255, 0.22); border: 1px solid #5f7dff; }
+.m-zombie { background: rgba(153, 95, 255, 0.2); border: 1px solid #9e75ff; }
+
+.panel {
+  padding: 12px;
+}
+
+.next-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* Battle phase */
+.battle-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.machine {
+  display: grid;
+  gap: 8px;
+}
+
+.machine .slot {
+  min-height: 86px;
+}
+
+.battle-screen .topbar {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.battle-layout-3col {
+  grid-template-columns: minmax(240px, 280px) minmax(420px, 1fr) minmax(240px, 300px);
+  align-items: stretch;
+}
+
+.battle-col {
+  min-width: 0;
+}
+
+.battle-panel {
+  height: 100%;
+}
+
+.battle-center-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+}
+
+.battle-machine-grid {
+  grid-template-columns: repeat(var(--grid-cols, 3), minmax(92px, 1fr));
+}
+
+.battle-cell {
+  min-height: 96px;
+}
+
+.battle-action-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.battle-spin-btn {
+  min-width: 220px;
+}
+
+.battle-next-btn {
+  min-width: 140px;
+}
+
+.battle-step-panel {
+  font-weight: 700;
+}
+
+.battle-step-victory {
+  border-color: #3f8a4b;
+  background: linear-gradient(180deg, #173521, #102a1a);
+}
+
+.battle-step-defeat {
+  border-color: #8a3f58;
+  background: linear-gradient(180deg, #361923, #2b121a);
+}
+
+.battle-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 20, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.battle-result-modal {
+  width: min(760px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+  border-color: #3d69a1;
+}
+
+.result-section {
+  background: #0b1a32;
+  border: 1px solid #2a4b75;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.result-section h4 {
+  margin: 0 0 8px;
+}
+
+.result-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.battle-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.log {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.93rem;
+  color: #d3e4fb;
+  background: #0a162c;
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid #224368;
+}
+
+.log-entry {
+  padding: 4px 0;
+  border-bottom: 1px dashed #244972;
+}
+
+.log-entry:last-child {
+  border-bottom: 0;
+}
+
+.battle-summary-panel {
+  padding-top: 10px;
+  border-color: #2f5d8d;
+  box-shadow: inset 0 0 0 1px rgba(53, 112, 173, 0.25);
+}
+
+.battle-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-card {
+  background: #0b1a32;
+  border: 1px solid #2d4f7a;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.6rem;
+}
+
+.summary-total {
+  border-color: #7a4b16;
+  background: linear-gradient(180deg, #3a2410, #2a1b0e);
+}
+
+/* Reward + gameover */
+.center-phase {
+  max-width: 760px;
+  margin: 30px auto 0;
+  display: grid;
+  gap: 14px;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.choice {
+  padding: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+@media (max-width: 920px) {
+  .build-layout,
+  .battle-layout,
+  .choices {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .battle-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
