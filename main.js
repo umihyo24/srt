@@ -20,8 +20,6 @@ const INITIAL_STATE = () => ({
   selectedMonsterId: null,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
-  swapMode: false,
-  swapSourceIndex: null,
   pendingPlacement: null,
   classBonus: null,
   reels: Array(18).fill(null),
@@ -89,6 +87,13 @@ function update(action, payload = {}) {
       gameState.selectedMonsterId = id;
       gameState.selectedSource = "reel";
       gameState.selectedSlotIndex = idx;
+      return;
+    }
+    case "clearSelection": {
+      if (gameState.phase !== "build") return;
+      gameState.selectedMonsterId = null;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
       return;
     }
     case "buyMonster": {
@@ -463,7 +468,6 @@ function getBuildStatusDisplay() {
 function renderBuildPhase() {
   const selected = monsterById(gameState.selectedMonsterId);
   const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
-  const selectedSellValue = selected ? Math.floor(selected.cost / 2) : 0;
   const pendingMonster = monsterById(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
@@ -518,11 +522,10 @@ function renderBuildPhase() {
                       const monster = monsterById(id);
                       const isSelectedSlot =
                         gameState.selectedSource === "reel" && gameState.selectedSlotIndex === absoluteIndex;
-                      const isSwapSource = gameState.swapMode && gameState.swapSourceIndex === absoluteIndex;
                       return `<div class="slot" data-act="slot" data-index="${absoluteIndex}" ${
                         pendingMonster ? 'style="outline:2px solid #ffcc7a;cursor:pointer;"' : ""
                       }>
-                        <div class="${isSelectedSlot ? "build-selected-slot" : ""} ${isSwapSource ? "build-swap-source" : ""}" style="width:100%;padding:2px;border-radius:8px;">
+                        <div class="${isSelectedSlot ? "build-selected-slot" : ""}" style="width:100%;padding:2px;border-radius:8px;">
                           ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
                         </div>
                       </div>`;
@@ -544,20 +547,7 @@ function renderBuildPhase() {
                 : selected
                   ? `<div class="monster-chip ${selected.cls}">${selected.name}</div>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
-                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "リールスロット"}</p>
-                    ${isReelSelection ? `<p>売却価格 ${selectedSellValue}</p>` : ""}
-                    ${
-                      isReelSelection
-                        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            <button class="small btn-danger" data-act="sell-selected">売却</button>
-                            ${
-                              gameState.swapMode
-                                ? '<button class="small btn-secondary" data-act="cancel-swap">入れ替えキャンセル</button>'
-                                : '<button class="small btn-secondary" data-act="start-swap">入れ替え開始</button>'
-                            }
-                          </div>`
-                        : ""
-                    }`
+                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>`
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
@@ -608,10 +598,10 @@ function bindBuildEvents() {
       const slotIndex = Number(slot.dataset.index);
       if (gameState.pendingPlacement !== null) {
         update("placePendingMonster", { index: slotIndex });
-      } else if (gameState.swapMode) {
-        update("swapSlotWithSource", { index: slotIndex });
       } else if (gameState.reels[slotIndex]) {
         update("selectReelSlot", { index: slotIndex });
+      } else if (gameState.selectedSource === "reel") {
+        update("clearSelection");
       }
       render();
     });
