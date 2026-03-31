@@ -563,9 +563,17 @@ function renderBuildPhase() {
 
         <aside class="phase-root">
           <section class="panel">
-            <h3>現在の職業</h3>
-            <p><strong>${classInfo.name}</strong></p>
-            <p class="muted">${classInfo.desc}</p>
+            <h3>次のバトル情報</h3>
+            <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
+            <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
+            <button class="btn-primary build-start-btn" style="width:100%;margin-top:10px;" data-act="start" ${
+              pendingMonster ? "disabled" : ""
+            }>勝ちに行く</button>
+            ${
+              pendingMonster
+                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
+                : ""
+            }
           </section>
 
           <section class="panel">
@@ -591,20 +599,6 @@ function renderBuildPhase() {
             <h3>現在の職業</h3>
             <p><strong>${classInfo.name}</strong></p>
             <p class="muted">${classInfo.desc}</p>
-          </section>
-
-          <section class="panel">
-            <h3>次のバトル情報</h3>
-            <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
-            <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
-            <button class="btn-primary build-start-btn" style="width:100%;margin-top:10px;" data-act="start" ${
-              pendingMonster ? "disabled" : ""
-            }>勝ちに行く</button>
-            ${
-              pendingMonster
-                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
-                : ""
-            }
           </section>
         </aside>
       </div>
