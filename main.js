@@ -26,7 +26,7 @@ const INITIAL_STATE = () => ({
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
   shopChoices: rollShopChoices(MONSTERS, 3),
-  rerollCost: 1,
+  monsterRerollCost: 4,
   selectedMonsterId: null,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
@@ -34,6 +34,8 @@ const INITIAL_STATE = () => ({
   classSlots: [],
   maxClassSlots: 3,
   maxDuplicatePerClass: 2,
+  classChoices: rollClassChoices(CLASS_CHOICES, 3),
+  classRerollCost: 4,
   reels: Array(18).fill(null),
   enemy: { name: "ゴブリンウォーリア", hp: 10, atk: 2 },
   battle: {
@@ -60,6 +62,8 @@ const gameState = INITIAL_STATE();
 const app = document.getElementById("app");
 const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスターを購入してリールに配置します" });
 const SHOP_SIZE = 3;
+const REROLL_INITIAL_COST = 4;
+const CHOICE_COUNT = 3;
 
 function resetBuildUiState() {
   gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
@@ -77,6 +81,15 @@ function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
   return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((monster) => monster.id);
+}
+
+function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
+  const candidates = [...pool];
+  for (let i = candidates.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((classData) => classData.id);
 }
 
 function update(action, payload = {}) {
@@ -164,13 +177,14 @@ function update(action, payload = {}) {
     }
     case "rerollShop": {
       if (gameState.phase !== "build") return;
-      if (gameState.coins < gameState.rerollCost) {
+      if (gameState.coins < gameState.monsterRerollCost) {
         gameState.buildStatus = { type: "warn", text: "リロールに必要なコインが不足しています" };
         return;
       }
-      gameState.coins -= gameState.rerollCost;
-      gameState.shopChoices = rollShopChoices(MONSTERS, SHOP_SIZE);
-      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.rerollCost}コイン）` };
+      gameState.coins -= gameState.monsterRerollCost;
+      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
+      gameState.monsterRerollCost += 1;
       return;
     }
     case "placePendingMonster": {
@@ -306,6 +320,8 @@ function update(action, payload = {}) {
         gameState.battle.won = true;
         gameState.phase = "reward";
         gameState.coins += 8;
+        gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+        gameState.classRerollCost = REROLL_INITIAL_COST;
         gameState.round += 1;
         return;
       }
@@ -322,6 +338,7 @@ function update(action, payload = {}) {
       if (gameState.phase !== "reward") return;
       const picked = CLASS_CHOICES.find((c) => c.id === payload.classId);
       if (!picked) return;
+      if (!gameState.classChoices.includes(picked.id)) return;
       const currentCount = gameState.classSlots.length;
       const duplicateCount = gameState.classSlots.filter((classId) => classId === picked.id).length;
       if (currentCount >= gameState.maxClassSlots) {
@@ -335,12 +352,24 @@ function update(action, payload = {}) {
       gameState.classSlots.push(picked.id);
       gameState.phase = "build";
       resetBuildUiState();
-      gameState.shopChoices = rollShopChoices(MONSTERS, SHOP_SIZE);
+      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+      gameState.monsterRerollCost = REROLL_INITIAL_COST;
       gameState.enemy = {
         name: `ラウンド${gameState.round}の敵`,
         hp: 10 + gameState.round * 2,
         atk: 2 + Math.floor(gameState.round / 2)
       };
+      return;
+    }
+    case "rerollClassChoices": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.coins < gameState.classRerollCost) {
+        alert("リロールに必要なコインが不足しています。");
+        return;
+      }
+      gameState.coins -= gameState.classRerollCost;
+      gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+      gameState.classRerollCost += 1;
       return;
     }
     case "restart": {
@@ -542,7 +571,7 @@ function renderBuildPhase() {
               配置先を選ぶ（手動配置）
             </label>
             <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-              <button class="small btn-secondary" data-act="reroll-shop">リロール (${gameState.rerollCost}コイン)</button>
+              <button class="small btn-secondary" data-act="reroll-shop">リロール (${gameState.monsterRerollCost}コイン)</button>
             </div>
             <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
               ${buildStatus.text}
@@ -900,17 +929,26 @@ function renderBattlePhase() {
 }
 
 function renderRewardPhase() {
+  const visibleClassChoices = gameState.classChoices
+    .map((id) => CLASS_CHOICES.find((c) => c.id === id))
+    .filter(Boolean);
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
         <h2>リワードフェーズ（クラス選択）</h2>
-        <div class="badge">ラウンド ${gameState.round}</div>
+        <div class="badges">
+          <div class="badge">ラウンド ${gameState.round}</div>
+          <div class="badge">コイン ${gameState.coins}</div>
+        </div>
       </div>
 
       <section class="panel">
-        <h3>クラスを1つ選択してください</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <h3>クラスを1つ選択してください</h3>
+          <button class="small btn-secondary" data-act="reroll-class">リロール (${gameState.classRerollCost}コイン)</button>
+        </div>
         <div class="choices">
-          ${CLASS_CHOICES.map(
+          ${visibleClassChoices.map(
             (c) => `
             <article class="choice">
               <h4>${c.name}</h4>
@@ -928,6 +966,10 @@ function renderRewardPhase() {
       update("pickClass", { classId: btn.dataset.cid });
       render();
     });
+  });
+  app.querySelector("[data-act='reroll-class']")?.addEventListener("click", () => {
+    update("rerollClassChoices");
+    render();
   });
 }
 
