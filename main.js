@@ -31,7 +31,9 @@ const INITIAL_STATE = () => ({
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
   pendingPlacement: null,
-  classBonus: null,
+  classSlots: [],
+  maxClassSlots: 3,
+  maxDuplicatePerClass: 2,
   reels: Array(18).fill(null),
   enemy: { name: "ゴブリンウォーリア", hp: 10, atk: 2 },
   battle: {
@@ -240,7 +242,7 @@ function update(action, payload = {}) {
       gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
       gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
-      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classBonus);
+      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classSlots);
       const dmg = damageBreakdown.totalDamage;
       gameState.battle.lastDamage = damageBreakdown;
       gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
@@ -320,7 +322,17 @@ function update(action, payload = {}) {
       if (gameState.phase !== "reward") return;
       const picked = CLASS_CHOICES.find((c) => c.id === payload.classId);
       if (!picked) return;
-      gameState.classBonus = picked.id;
+      const currentCount = gameState.classSlots.length;
+      const duplicateCount = gameState.classSlots.filter((classId) => classId === picked.id).length;
+      if (currentCount >= gameState.maxClassSlots) {
+        alert("職業スロットが上限です。");
+        return;
+      }
+      if (duplicateCount >= gameState.maxDuplicatePerClass) {
+        alert("同じ職業はこれ以上選べません。");
+        return;
+      }
+      gameState.classSlots.push(picked.id);
       gameState.phase = "build";
       resetBuildUiState();
       gameState.shopChoices = rollShopChoices(MONSTERS, SHOP_SIZE);
@@ -382,7 +394,7 @@ function spinVisibleGrid(reels) {
   return grid;
 }
 
-function calcDamageBreakdown(grid, classBonus) {
+function calcDamageBreakdown(grid, classSlots = []) {
   let baseDamage = 0;
   let bonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
@@ -394,8 +406,10 @@ function calcDamageBreakdown(grid, classBonus) {
     counts[id] += 1;
   });
 
-  if (classBonus === "slime_master" && counts.slime >= 3) bonusDamage += 1;
-  if (classBonus === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+  classSlots.forEach((classId) => {
+    if (classId === "slime_master" && counts.slime >= 3) bonusDamage += 1;
+    if (classId === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+  });
 
   return {
     baseDamage,
@@ -462,17 +476,34 @@ function getBuildStatusDisplay() {
   return status;
 }
 
-function getCurrentClassInfo(classBonus) {
-  const picked = CLASS_CHOICES.find((c) => c.id === classBonus);
-  if (!picked) {
+function getGroupedClassEntries(classSlots = []) {
+  return classSlots.reduce((acc, classId) => {
+    const picked = CLASS_CHOICES.find((c) => c.id === classId);
+    if (!picked) return acc;
+    const found = acc.find((item) => item.id === classId);
+    if (found) {
+      found.count += 1;
+      return acc;
+    }
+    acc.push({ id: classId, name: picked.name, desc: picked.desc, count: 1 });
+    return acc;
+  }, []);
+}
+
+function getCurrentClassInfo(classSlots = []) {
+  const grouped = getGroupedClassEntries(classSlots);
+  if (grouped.length === 0) {
     return {
-      name: "現在の職業: なし",
-      desc: "職業を獲得するとここに効果が表示されます。"
+      title: "現在の職業: なし",
+      entries: []
     };
   }
   return {
-    name: `現在の職業: ${picked.name}`,
-    desc: picked.desc
+    title: "現在の職業",
+    entries: grouped.map((item) => ({
+      label: `${item.name}${item.count > 1 ? ` x${item.count}` : ""}`,
+      desc: item.desc
+    }))
   };
 }
 
@@ -480,7 +511,7 @@ function renderBuildPhase() {
   const visibleShopMonsters = gameState.shopChoices
     .map((id) => monsterById(id))
     .filter(Boolean);
-  const classInfo = getCurrentClassInfo(gameState.classBonus);
+  const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
   const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
   const sellValue = getSellValue(selected);
@@ -597,8 +628,14 @@ function renderBuildPhase() {
 
           <section class="panel">
             <h3>現在の職業</h3>
-            <p><strong>${classInfo.name}</strong></p>
-            <p class="muted">${classInfo.desc}</p>
+            <p><strong>${classInfo.title}</strong></p>
+            ${
+              classInfo.entries.length === 0
+                ? '<p class="muted">職業を獲得するとここに効果が表示されます。</p>'
+                : `<ul>${classInfo.entries
+                    .map((entry) => `<li><strong>${entry.label}</strong><br /><span class="muted">${entry.desc}</span></li>`)
+                    .join("")}</ul>`
+            }
           </section>
         </aside>
       </div>
@@ -661,11 +698,11 @@ function bindBuildEvents() {
   });
 }
 
-function getClassBonusLabel(classBonus) {
-  if (classBonus === "slime_master") return "スライムマスター（スライム3体以上で+1）";
-  if (classBonus === "necromancer") return "ネクロマンサー（不死系攻撃+1/体）";
-  if (classBonus === "beast_tamer") return "ビーストテイマー（次ラウンド開始時コイン+2）";
-  return "なし";
+function getClassBonusLabel(classSlots = []) {
+  if (classSlots.length === 0) return "なし";
+  return getGroupedClassEntries(classSlots)
+    .map((entry) => `${entry.name}${entry.count > 1 ? ` x${entry.count}` : ""}`)
+    .join(" / ");
 }
 
 function getEnemyAttackInfo(battleTurn) {
@@ -818,7 +855,7 @@ function getBattleOutcomeText(outcome) {
 }
 
 function renderBattlePhase() {
-  const classBonusLabel = getClassBonusLabel(gameState.classBonus);
+  const classBonusLabel = getClassBonusLabel(gameState.classSlots);
   app.innerHTML = `
     <div class="phase-root battle-screen">
       <div class="topbar">
