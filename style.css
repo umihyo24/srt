@@ -108,13 +108,6 @@ button {
   margin-top: 8px;
 }
 
-.build-header-actions {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-  min-width: 260px;
-}
-
 .shop-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -221,13 +214,6 @@ button {
 .build-start-btn {
   width: min(320px, 100%);
   min-height: 44px;
-}
-
-.build-start-hint {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #cde4ff;
-  text-align: right;
 }
 
 /* Battle phase */

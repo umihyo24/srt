@@ -500,14 +500,6 @@ function renderBuildPhase() {
             <div class="badge">HP ${gameState.hp}</div>
           </div>
         </div>
-        <div class="build-header-actions">
-          <button class="btn-primary build-start-btn" data-act="start" ${pendingMonster ? "disabled" : ""}>勝ちに行く</button>
-          ${
-            pendingMonster
-              ? '<p class="build-start-hint">配置待ちモンスターの配置後にバトル開始できます。</p>'
-              : '<p class="build-start-hint">準備ができたらすぐ出撃できます。</p>'
-          }
-        </div>
       </div>
 
       <div class="build-layout">
@@ -605,7 +597,14 @@ function renderBuildPhase() {
             <h3>次のバトル情報</h3>
             <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
             <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
-            <p class="muted" style="margin-top:8px;">準備ができたら左側の「勝ちに行く」から出撃。</p>
+            <button class="btn-primary build-start-btn" style="width:100%;margin-top:10px;" data-act="start" ${
+              pendingMonster ? "disabled" : ""
+            }>勝ちに行く</button>
+            ${
+              pendingMonster
+                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
+                : ""
+            }
           </section>
         </aside>
       </div>
