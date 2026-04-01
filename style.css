@@ -199,20 +199,16 @@ button {
   width: 100%;
   border-radius: 7px;
   padding: 6px;
-  text-align: center;
   font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
   gap: 6px;
+  text-align: center;
 }
 
-.monster-habitat-mini {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  flex: 0 0 14px;
+.habitat-band-chip {
+  height: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.52);
 }
 
 .m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }

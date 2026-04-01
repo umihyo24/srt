@@ -672,18 +672,26 @@ function monsterById(id) {
   return MONSTERS.find((m) => m.id === id) || null;
 }
 
-function buildHabitatPanelStyle(monster) {
+function getHabitatColors(monster) {
   const habitats = getMonsterHabitats(monster);
   if (habitats.length === 1) {
-    const color = CONFIG.HABITAT_COLORS[habitats[0]];
-    return `background:${color};`;
+    return [CONFIG.HABITAT_COLORS[habitats[0]]];
   }
   if (habitats.length === 2) {
-    const colorA = CONFIG.HABITAT_COLORS[habitats[0]];
-    const colorB = CONFIG.HABITAT_COLORS[habitats[1]];
-    return `background:linear-gradient(135deg, ${colorA} 0%, ${colorA} 48%, ${colorB} 52%, ${colorB} 100%);`;
+    return [CONFIG.HABITAT_COLORS[habitats[0]], CONFIG.HABITAT_COLORS[habitats[1]]];
   }
-  return "background:#24354a;";
+  return ["#24354a"];
+}
+
+function buildHabitatPanelStyle(monster) {
+  const colors = getHabitatColors(monster);
+  if (colors.length === 1) return `background:${colors[0]};`;
+  const [colorA, colorB] = colors;
+  return `background:linear-gradient(135deg, ${colorA} 0%, ${colorA} 48%, ${colorB} 52%, ${colorB} 100%);`;
+}
+
+function renderHabitatBand(monster, className = "habitat-panel") {
+  return `<div class="${className}" style="${buildHabitatPanelStyle(monster)}"></div>`;
 }
 
 function render() {
@@ -802,7 +810,7 @@ function renderBuildPhase() {
                 <article class="card ${entry.monster.cls} ${entry.kept ? "shop-kept" : ""} ${
                   gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
                 }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
-                  <div class="habitat-panel" style="${buildHabitatPanelStyle(entry.monster)}"></div>
+                  ${renderHabitatBand(entry.monster, "habitat-panel")}
                   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                     <h4>${entry.monster.name}</h4>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
@@ -835,8 +843,8 @@ function renderBuildPhase() {
                           ${
                             monster
                               ? `<div class="monster-chip ${monster.cls}">
-                                  <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(monster)}"></div>
-                                  ${monster.name}
+                                  ${renderHabitatBand(monster, "habitat-band-chip")}
+                                  <span>${monster.name}</span>
                                 </div>`
                               : "空"
                           }
@@ -876,10 +884,10 @@ function renderBuildPhase() {
                 ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
                 : selected
                   ? `<div class="monster-chip ${selected.cls}">
-                      <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(selected)}"></div>
-                      ${selected.name}
+                      ${renderHabitatBand(selected, "habitat-band-chip")}
+                      <span>${selected.name}</span>
                     </div>
-                    <div class="habitat-panel" style="margin-top:8px;${buildHabitatPanelStyle(selected)}"></div>
+                    ${renderHabitatBand(selected, "habitat-panel")}
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
@@ -1022,8 +1030,8 @@ function renderBattleGridCells() {
       return `<div class="slot battle-cell">${
         m
           ? `<div class="monster-chip ${m.cls}">
-              <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(m)}"></div>
-              ${m.name}
+              ${renderHabitatBand(m, "habitat-band-chip")}
+              <span>${m.name}</span>
             </div>`
           : '<div class="muted">Empty</div>'
       }</div>`;
