@@ -61,6 +61,7 @@ const INITIAL_STATE = () => ({
   mergeMode: false,
   pendingPlacement: null,
   pendingPurchaseSlotIndex: null,
+  replacementConfirm: null,
   classSlots: [],
   maxClassSlots: 3,
   maxDuplicatePerClass: 2,
@@ -132,6 +133,10 @@ function formatStar(star = 1) {
   return `☆${Math.max(1, star)}`;
 }
 
+function getMonsterStarLabel(unitLike) {
+  return formatStar(getUnitStar(unitLike));
+}
+
 function clearReelSelection() {
   gameState.selectedMonsterId = null;
   gameState.selectedMonsterStar = 1;
@@ -166,6 +171,41 @@ function moveReelMonster(fromIndex, toIndex) {
   const fromUnit = toReelUnit(gameState.reels[fromIndex]);
   gameState.reels[toIndex] = fromUnit;
   gameState.reels[fromIndex] = null;
+}
+
+function getReplacementPreview(incomingUnit, targetUnit) {
+  const incoming = toReelUnit(incomingUnit);
+  const target = toReelUnit(targetUnit);
+  if (!incoming || !target) return null;
+  const incomingMonster = monsterById(incoming.id);
+  const targetMonster = monsterById(target.id);
+  const sellValue = getSellValue(targetMonster);
+  return {
+    incoming,
+    target,
+    incomingMonster,
+    targetMonster,
+    sellValue
+  };
+}
+
+function applyReplacementWithSell(targetIndex) {
+  const incoming = toReelUnit(gameState.pendingPlacement);
+  if (!incoming) return;
+  const existing = toReelUnit(gameState.reels[targetIndex]);
+  gameState.reels[targetIndex] = incoming;
+  if (existing) {
+    const existingMonster = monsterById(existing.id);
+    const sellValue = getSellValue(existingMonster);
+    gameState.coins += sellValue;
+    gameState.buildStatus = {
+      type: "info",
+      text: `${existingMonster?.name ?? "モンスター"} ${getMonsterStarLabel(existing)} を売却して配置しました（+${sellValue}コイン）`
+    };
+  } else {
+    const incomingMonster = monsterById(incoming.id);
+    gameState.buildStatus = { type: "info", text: `${incomingMonster?.name ?? "モンスター"} ${getMonsterStarLabel(incoming)} を配置しました` };
+  }
 }
 
 function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
@@ -352,7 +392,8 @@ function update(action, payload = {}) {
         gameState.coins -= monster.cost;
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
-        gameState.buildStatus = { type: "info", text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください` };
+        gameState.replacementConfirm = null;
+        gameState.buildStatus = { type: "info", text: `${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} を配置待ちです` };
         return;
       }
 
@@ -361,6 +402,7 @@ function update(action, payload = {}) {
         gameState.coins -= monster.cost;
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
+        gameState.replacementConfirm = null;
         gameState.buildStatus = { type: "warn", text: `リール満員: ${monster.name}の配置先を選ぶと既存モンスターを売却して置き換えます` };
         return;
       }
@@ -399,24 +441,54 @@ function update(action, payload = {}) {
       const incomingUnit = toReelUnit(gameState.pendingPlacement);
       if (!incomingUnit) return;
       const existingUnit = toReelUnit(gameState.reels[idx]);
-      gameState.reels[idx] = incomingUnit;
-      if (existingUnit) {
-        const soldMonster = monsterById(existingUnit.id);
-        const sellValue = getSellValue(soldMonster);
-        gameState.coins += sellValue;
+      if (existingUnit && canMergeMonsters(incomingUnit, existingUnit)) {
+        const merged = mergeMonsters(incomingUnit, existingUnit);
+        gameState.reels[idx] = merged;
+        const mergedMonster = monsterById(merged.id);
         gameState.buildStatus = {
           type: "info",
-          text: `${soldMonster?.name ?? "モンスター"}を売却（+${sellValue}）して配置しました`
+          text: `${mergedMonster?.name ?? "モンスター"}どうしが合成！ ${getMonsterStarLabel(merged)}になった！`
         };
+      } else if (existingUnit) {
+        const preview = getReplacementPreview(incomingUnit, existingUnit);
+        gameState.replacementConfirm = {
+          targetIndex: idx,
+          targetUnit: preview?.target ?? existingUnit,
+          incomingUnit: preview?.incoming ?? incomingUnit,
+          sellValue: preview?.sellValue ?? 0
+        };
+        gameState.buildStatus = { type: "warn", text: "置き換え確認中: 右パネルで確定またはキャンセルしてください" };
+        return;
       } else {
-        gameState.buildStatus = { type: "info", text: "モンスターを配置しました" };
+        applyReplacementWithSell(idx);
       }
       gameState.pendingPlacement = null;
       if (gameState.pendingPurchaseSlotIndex !== null) {
         gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
       }
       gameState.pendingPurchaseSlotIndex = null;
+      gameState.replacementConfirm = null;
       clearReelSelection();
+      return;
+    }
+    case "confirmReplacement": {
+      if (gameState.phase !== "build") return;
+      if (!gameState.replacementConfirm || gameState.pendingPlacement === null) return;
+      applyReplacementWithSell(gameState.replacementConfirm.targetIndex);
+      gameState.pendingPlacement = null;
+      if (gameState.pendingPurchaseSlotIndex !== null) {
+        gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
+      }
+      gameState.pendingPurchaseSlotIndex = null;
+      gameState.replacementConfirm = null;
+      clearReelSelection();
+      return;
+    }
+    case "cancelReplacement": {
+      if (gameState.phase !== "build") return;
+      if (!gameState.replacementConfirm) return;
+      gameState.replacementConfirm = null;
+      gameState.buildStatus = { type: "info", text: "置き換えをキャンセルしました。配置先を選び直してください" };
       return;
     }
     case "toggleMergeMode": {
@@ -829,6 +901,11 @@ function renderHabitatBand(monster, className = "habitat-panel") {
   return `<div class="${className}" style="${buildHabitatPanelStyle(monster)}"></div>`;
 }
 
+function renderCostBadge(monster) {
+  if (!monster) return "";
+  return `<div class="shop-cost-badge">💰${monster.cost}</div>`;
+}
+
 function render() {
   switch (gameState.phase) {
     case "build":
@@ -861,7 +938,7 @@ function getBuildStatusDisplay() {
     if (monster) {
       return {
         type: "info",
-        text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください`
+        text: `配置待ち: ${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} を18スロットのどこかへ配置してください`
       };
     }
   }
@@ -946,13 +1023,14 @@ function renderBuildPhase() {
                 <article class="card ${entry.monster.cls} ${entry.kept ? "shop-kept" : ""} ${
                   gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
                 }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
+                  ${renderCostBadge(entry.monster)}
                   ${renderHabitatBand(entry.monster, "habitat-panel")}
                   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <h4>${entry.monster.name}</h4>
+                    <h4>${entry.monster.name} ${getMonsterStarLabel(createUnit(entry.monster.id, 1))}</h4>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
-                  <div class="stats">コスト ${entry.monster.cost} / HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
-                  <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>購入</button>
+                  <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
+                  <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}で購入</button>
                 </article>`
               ).join("")}
             </div>
@@ -1017,7 +1095,8 @@ function renderBuildPhase() {
             <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
             ${
               pendingMonster
-                ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
+                ? `<div class="monster-chip ${pendingMonster.cls} sp-${pendingMonster.species}">${pendingMonster.name} ${getMonsterStarLabel(gameState.pendingPlacement)}</div>
+                   <p>このモンスターをスロットに配置してください。</p>`
                 : selected
                   ? `<div class="monster-chip ${selected.cls} sp-${selected.species}">
                       ${renderHabitatBand(selected, "habitat-band-chip")}
@@ -1047,6 +1126,21 @@ function renderBuildPhase() {
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
+
+          ${
+            gameState.replacementConfirm
+              ? `<section class="panel">
+                  <h3>置き換え確認</h3>
+                  <p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} を売却して、</p>
+                  <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を配置しますか？</p>
+                  <p>売却額: +${gameState.replacementConfirm.sellValue}コイン</p>
+                  <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="small btn-secondary" data-act="cancel-replacement">キャンセル</button>
+                    <button class="small btn-danger" data-act="confirm-replacement">置き換える</button>
+                  </div>
+                </section>`
+              : ""
+          }
 
           <section class="panel">
             <h3>現在の職業</h3>
@@ -1135,6 +1229,16 @@ function bindBuildEvents() {
 
   app.querySelector("[data-act='toggle-merge-mode']")?.addEventListener("click", () => {
     update("toggleMergeMode");
+    render();
+  });
+
+  app.querySelector("[data-act='confirm-replacement']")?.addEventListener("click", () => {
+    update("confirmReplacement");
+    render();
+  });
+
+  app.querySelector("[data-act='cancel-replacement']")?.addEventListener("click", () => {
+    update("cancelReplacement");
     render();
   });
 
