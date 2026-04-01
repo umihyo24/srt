@@ -20,8 +20,13 @@ const CLASS_CHOICES = [
   { id: "lucky_strike", name: "ラッキーストライク", desc: "合計ダメージが奇数なら追加ダメージ+2", stackable: true }
 ];
 
+const ROUTE_CHOICES = [
+  { id: "normal", label: "通常ルート", enemyHpBonus: 0, enemyAtkBonus: 0, nextWinBonusCoins: 0 },
+  { id: "strong", label: "強敵ルート", enemyHpBonus: 4, enemyAtkBonus: 1, nextWinBonusCoins: 4 }
+];
+
 const INITIAL_STATE = () => ({
-  phase: "build", // build | battle | reward | gameover
+  phase: "build", // build | battle | reward | route | gameover
   round: 1,
   coins: 12,
   hp: 12,
@@ -38,8 +43,10 @@ const INITIAL_STATE = () => ({
   maxDuplicatePerClass: 2,
   classChoices: rollClassChoices(CLASS_CHOICES, 3),
   classRerollCost: 4,
+  nextRoute: ROUTE_CHOICES[0],
+  currentBattleRoute: null,
   reels: Array(18).fill(null),
-  enemy: { name: "ゴブリンウォーリア", hp: 10, atk: 2 },
+  enemy: { ...buildEnemyForRound(1, ROUTE_CHOICES[0]) },
   battle: {
     turn: 0,
     enemyHp: 10,
@@ -97,7 +104,7 @@ function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
   for (let i = 0; i < choiceCount; i += 1) {
     const preset = baseEntries[i] ?? null;
     if (preset && preset.kept) {
-      entries.push({ monsterId: preset.monsterId, kept: false });
+      entries.push({ monsterId: preset.monsterId, kept: true });
       continue;
     }
     const excluded = entries.map((entry) => entry.monsterId);
@@ -107,13 +114,18 @@ function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
   return entries;
 }
 
-function rerollShopEntriesWithKept(entries) {
+function rerollShopEntriesWithKept(entries, replacedSlotIndex = null) {
   const next = entries.map((entry) => ({ ...entry }));
   const placedIds = [];
   for (let i = 0; i < next.length; i += 1) {
+    if (i === replacedSlotIndex) {
+      const monsterId = pickMonsterId(MONSTERS, placedIds);
+      next[i] = { monsterId, kept: false };
+      placedIds.push(monsterId);
+      continue;
+    }
     if (next[i].kept) {
       placedIds.push(next[i].monsterId);
-      next[i] = { ...next[i], kept: false };
       continue;
     }
     const monsterId = pickMonsterId(MONSTERS, placedIds);
@@ -124,7 +136,7 @@ function rerollShopEntriesWithKept(entries) {
 }
 
 function refreshShopEntriesForNextBuild(entries) {
-  return rerollShopEntriesWithKept(entries);
+  return rerollShopEntriesWithKept(entries, null);
 }
 
 function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
@@ -134,6 +146,19 @@ function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
   return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((classData) => classData.id);
+}
+
+function getRouteById(routeId) {
+  return ROUTE_CHOICES.find((route) => route.id === routeId) || ROUTE_CHOICES[0];
+}
+
+function buildEnemyForRound(round, route) {
+  const safeRoute = route || ROUTE_CHOICES[0];
+  return {
+    name: `ラウンド${round}の敵`,
+    hp: 10 + round * 2 + safeRoute.enemyHpBonus,
+    atk: 2 + Math.floor(round / 2) + safeRoute.enemyAtkBonus
+  };
 }
 
 function countOwnedClass(classId) {
@@ -165,11 +190,7 @@ function enterBuildPhaseFromReward() {
   resetBuildUiState();
   gameState.shopChoices = refreshShopEntriesForNextBuild(gameState.shopChoices);
   gameState.monsterRerollCost = REROLL_INITIAL_COST;
-  gameState.enemy = {
-    name: `ラウンド${gameState.round}の敵`,
-    hp: 10 + gameState.round * 2,
-    atk: 2 + Math.floor(gameState.round / 2)
-  };
+  gameState.enemy = buildEnemyForRound(gameState.round, gameState.nextRoute);
 }
 
 function update(action, payload = {}) {
@@ -256,7 +277,7 @@ function update(action, payload = {}) {
       gameState.coins -= monster.cost;
       gameState.reels[emptyIndex] = monster.id;
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
-      gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices);
+      gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, slotIndex);
       return;
     }
     case "toggleShopKeep": {
@@ -321,6 +342,7 @@ function update(action, payload = {}) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
       }
+      gameState.currentBattleRoute = gameState.nextRoute;
       gameState.phase = "battle";
       gameState.battle = {
         turn: 0,
@@ -411,7 +433,8 @@ function update(action, payload = {}) {
         gameState.battle.resolved = true;
         gameState.battle.won = true;
         gameState.phase = "reward";
-        gameState.coins += 8;
+        gameState.coins += 8 + (gameState.currentBattleRoute?.nextWinBonusCoins ?? 0);
+        gameState.currentBattleRoute = null;
         gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
         gameState.classRerollCost = REROLL_INITIAL_COST;
         gameState.round += 1;
@@ -437,11 +460,17 @@ function update(action, payload = {}) {
         return;
       }
       gameState.classSlots.push(picked.id);
-      enterBuildPhaseFromReward();
+      gameState.phase = "route";
       return;
     }
     case "skipClassSelection": {
       if (gameState.phase !== "reward") return;
+      gameState.phase = "route";
+      return;
+    }
+    case "pickRoute": {
+      if (gameState.phase !== "route") return;
+      gameState.nextRoute = getRouteById(payload.routeId);
       enterBuildPhaseFromReward();
       return;
     }
@@ -568,6 +597,9 @@ function render() {
       return;
     case "reward":
       renderRewardPhase();
+      return;
+    case "route":
+      renderRoutePhase();
       return;
     case "gameover":
       renderGameOverPhase();
@@ -716,8 +748,10 @@ function renderBuildPhase() {
         <aside class="phase-root">
           <section class="panel">
             <h3>次のバトル情報</h3>
+            <div class="next-info"><span>ルート</span><span>${gameState.nextRoute.label}</span></div>
             <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
             <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
+            <div class="next-info"><span>勝利ボーナス</span><span>+${gameState.nextRoute.nextWinBonusCoins}コイン</span></div>
             <button class="btn-primary build-start-btn" style="width:100%;margin-top:10px;" data-act="start" ${
               pendingMonster ? "disabled" : ""
             }>勝ちに行く</button>
@@ -1086,6 +1120,39 @@ function renderRewardPhase() {
   app.querySelector("[data-act='skip-class']")?.addEventListener("click", () => {
     update("skipClassSelection");
     render();
+  });
+}
+
+function renderRoutePhase() {
+  app.innerHTML = `
+    <div class="center-phase">
+      <div class="topbar">
+        <h2>ルート選択（次の戦闘条件）</h2>
+        <div class="badge">ラウンド ${gameState.round}</div>
+      </div>
+      <section class="panel">
+        <h3>次に進むルートを選択してください</h3>
+        <div class="choices">
+          ${ROUTE_CHOICES.map(
+            (route) => `
+            <article class="choice">
+              <h4>${route.label}</h4>
+              <p class="muted">敵HP補正 +${route.enemyHpBonus}</p>
+              <p class="muted">敵攻撃補正 +${route.enemyAtkBonus}</p>
+              <p class="muted">次回勝利ボーナス +${route.nextWinBonusCoins}コイン</p>
+              <button class="btn-secondary" data-act="pick-route" data-rid="${route.id}">このルートに進む</button>
+            </article>`
+          ).join("")}
+        </div>
+      </section>
+    </div>
+  `;
+
+  app.querySelectorAll("[data-act='pick-route']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      update("pickRoute", { routeId: btn.dataset.rid });
+      render();
+    });
   });
 }
 
