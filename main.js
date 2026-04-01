@@ -58,6 +58,7 @@ const INITIAL_STATE = () => ({
   selectedMonsterStar: 1,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
+  mergeMode: false,
   pendingPlacement: null,
   pendingPurchaseSlotIndex: null,
   classSlots: [],
@@ -129,6 +130,42 @@ function getUnitStar(slotValue) {
 
 function formatStar(star = 1) {
   return `☆${Math.max(1, star)}`;
+}
+
+function clearReelSelection() {
+  gameState.selectedMonsterId = null;
+  gameState.selectedMonsterStar = 1;
+  gameState.selectedSource = null;
+  gameState.selectedSlotIndex = null;
+}
+
+function canMergeMonsters(sourceUnit, targetUnit) {
+  const src = toReelUnit(sourceUnit);
+  const dst = toReelUnit(targetUnit);
+  if (!src || !dst) return false;
+  if (src.id !== dst.id) return false;
+  if (src.star !== dst.star) return false;
+  if (src.star >= CONFIG.MERGE.MAX_STAR) return false;
+  return true;
+}
+
+function mergeMonsters(sourceUnit, targetUnit) {
+  if (!canMergeMonsters(sourceUnit, targetUnit)) return null;
+  const src = toReelUnit(sourceUnit);
+  return createUnit(src.id, src.star + 1);
+}
+
+function swapReelSlots(fromIndex, toIndex) {
+  const fromUnit = toReelUnit(gameState.reels[fromIndex]);
+  const toUnit = toReelUnit(gameState.reels[toIndex]);
+  gameState.reels[toIndex] = fromUnit;
+  gameState.reels[fromIndex] = toUnit;
+}
+
+function moveReelMonster(fromIndex, toIndex) {
+  const fromUnit = toReelUnit(gameState.reels[fromIndex]);
+  gameState.reels[toIndex] = fromUnit;
+  gameState.reels[fromIndex] = null;
 }
 
 function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
@@ -282,10 +319,7 @@ function update(action, payload = {}) {
     }
     case "clearSelection": {
       if (gameState.phase !== "build") return;
-      gameState.selectedMonsterId = null;
-      gameState.selectedMonsterStar = 1;
-      gameState.selectedSource = null;
-      gameState.selectedSlotIndex = null;
+      clearReelSelection();
       return;
     }
     case "buyMonster": {
@@ -365,32 +399,33 @@ function update(action, payload = {}) {
       const incomingUnit = toReelUnit(gameState.pendingPlacement);
       if (!incomingUnit) return;
       const existingUnit = toReelUnit(gameState.reels[idx]);
-      if (existingUnit && existingUnit.id === incomingUnit.id && existingUnit.star < CONFIG.MERGE.MAX_STAR) {
-        gameState.reels[idx] = createUnit(existingUnit.id, existingUnit.star + 1);
-        gameState.buildStatus = { type: "info", text: `${monsterById(existingUnit.id)?.name ?? existingUnit.id}が${formatStar(existingUnit.star + 1)}に強化されました` };
+      gameState.reels[idx] = incomingUnit;
+      if (existingUnit) {
+        const soldMonster = monsterById(existingUnit.id);
+        const sellValue = getSellValue(soldMonster);
+        gameState.coins += sellValue;
+        gameState.buildStatus = {
+          type: "info",
+          text: `${soldMonster?.name ?? "モンスター"}を売却（+${sellValue}）して配置しました`
+        };
       } else {
-        gameState.reels[idx] = incomingUnit;
-        if (existingUnit) {
-          const soldMonster = monsterById(existingUnit.id);
-          const sellValue = getSellValue(soldMonster);
-          gameState.coins += sellValue;
-          gameState.buildStatus = {
-            type: "info",
-            text: `${soldMonster?.name ?? "モンスター"}を売却（+${sellValue}）して配置しました`
-          };
-        } else {
-          gameState.buildStatus = { type: "info", text: "モンスターを配置しました" };
-        }
+        gameState.buildStatus = { type: "info", text: "モンスターを配置しました" };
       }
       gameState.pendingPlacement = null;
       if (gameState.pendingPurchaseSlotIndex !== null) {
         gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
       }
       gameState.pendingPurchaseSlotIndex = null;
-      gameState.selectedMonsterId = null;
-      gameState.selectedMonsterStar = 1;
-      gameState.selectedSource = null;
-      gameState.selectedSlotIndex = null;
+      clearReelSelection();
+      return;
+    }
+    case "toggleMergeMode": {
+      if (gameState.phase !== "build") return;
+      gameState.mergeMode = !gameState.mergeMode;
+      gameState.buildStatus = {
+        type: "info",
+        text: gameState.mergeMode ? "マージモードON: 同ID/同レベルのみ重ねて強化" : "マージモードOFF: 通常は移動/入れ替え"
+      };
       return;
     }
     case "clearSlot": {
@@ -431,16 +466,14 @@ function update(action, payload = {}) {
       if (!fromUnit) return;
       const toUnit = toReelUnit(gameState.reels[to]);
       if (!toUnit) {
-        gameState.reels[to] = fromUnit;
-        gameState.reels[from] = null;
+        moveReelMonster(from, to);
         gameState.buildStatus = { type: "info", text: "モンスターを移動しました" };
-      } else if (toUnit.id === fromUnit.id && toUnit.star < CONFIG.MERGE.MAX_STAR) {
-        gameState.reels[to] = createUnit(toUnit.id, toUnit.star + 1);
+      } else if (gameState.mergeMode && canMergeMonsters(fromUnit, toUnit)) {
+        gameState.reels[to] = mergeMonsters(fromUnit, toUnit);
         gameState.reels[from] = null;
         gameState.buildStatus = { type: "info", text: `${monsterById(toUnit.id)?.name ?? toUnit.id}が${formatStar(toUnit.star + 1)}に強化されました` };
       } else {
-        gameState.reels[to] = fromUnit;
-        gameState.reels[from] = toUnit;
+        swapReelSlots(from, to);
         gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
       }
       const selectedUnit = toReelUnit(gameState.reels[to]);
@@ -995,6 +1028,17 @@ function renderBuildPhase() {
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
+                    ${isReelSelection ? `<p>マージモード: ${gameState.mergeMode ? "ON" : "OFF"}</p>` : ""}
+                    ${
+                      isReelSelection
+                        ? '<button class="small btn-secondary" data-act="clear-selected">選択解除</button>'
+                        : ""
+                    }
+                    ${
+                      isReelSelection
+                        ? '<button class="small btn-secondary" data-act="toggle-merge-mode">マージモード切替</button>'
+                        : ""
+                    }
                     ${
                       canSell
                         ? '<button class="small btn-danger" data-act="sell-selected">売却</button>'
@@ -1062,6 +1106,12 @@ function bindBuildEvents() {
       const slotIndex = Number(slot.dataset.index);
       if (gameState.pendingPlacement !== null) {
         update("placePendingMonster", { index: slotIndex });
+      } else if (
+        gameState.selectedSource === "reel"
+        && gameState.selectedSlotIndex !== null
+        && gameState.selectedSlotIndex === slotIndex
+      ) {
+        update("clearSelection");
       } else if (gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.selectedSlotIndex !== slotIndex) {
         update("moveSelectedReelMonster", { index: slotIndex });
       } else if (gameState.reels[slotIndex]) {
@@ -1075,6 +1125,16 @@ function bindBuildEvents() {
 
   app.querySelector("[data-act='sell-selected']")?.addEventListener("click", () => {
     update("sellSelectedMonster");
+    render();
+  });
+
+  app.querySelector("[data-act='clear-selected']")?.addEventListener("click", () => {
+    update("clearSelection");
+    render();
+  });
+
+  app.querySelector("[data-act='toggle-merge-mode']")?.addEventListener("click", () => {
+    update("toggleMergeMode");
     render();
   });
 
