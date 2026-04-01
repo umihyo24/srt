@@ -13,9 +13,11 @@ const MONSTERS = [
 ];
 
 const CLASS_CHOICES = [
-  { id: "slime_master", name: "スライムマスター", desc: "スライムが揃うと追加ダメージ+1" },
-  { id: "necromancer", name: "ネクロマンサー", desc: "不死系(スケルトン/ゾンビ)の攻撃+1" },
-  { id: "beast_tamer", name: "ビーストテイマー", desc: "次ラウンド開始時コイン+2" }
+  { id: "slime_master", name: "スライムマスター", desc: "スライムが揃うと追加ダメージ+1", stackable: true },
+  { id: "necromancer", name: "ネクロマンサー", desc: "不死系(スケルトン/ゾンビ)の攻撃+1", stackable: true },
+  { id: "beast_tamer", name: "ビーストテイマー", desc: "次ラウンド開始時コイン+2", stackable: false, category: "economic" },
+  { id: "berserker", name: "バーサーカー", desc: "出撃モンスター1体につき追加ダメージ+1", stackable: true },
+  { id: "lucky_strike", name: "ラッキーストライク", desc: "合計ダメージが奇数なら追加ダメージ+2", stackable: true }
 ];
 
 const INITIAL_STATE = () => ({
@@ -25,7 +27,7 @@ const INITIAL_STATE = () => ({
   hp: 12,
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
-  shopChoices: rollShopChoices(MONSTERS, 3),
+  shopChoices: rollShopEntries(MONSTERS, 3),
   monsterRerollCost: 4,
   selectedMonsterId: null,
   selectedSource: null, // shop | reel | null
@@ -83,6 +85,57 @@ function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
   return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((monster) => monster.id);
 }
 
+function pickMonsterId(pool, excludedIds = []) {
+  const ids = pool.map((monster) => monster.id);
+  const uniqueCandidates = ids.filter((id) => !excludedIds.includes(id));
+  const source = uniqueCandidates.length > 0 ? uniqueCandidates : ids;
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
+  const entries = [];
+  for (let i = 0; i < choiceCount; i += 1) {
+    const preset = baseEntries[i] ?? null;
+    if (preset && preset.frozen) {
+      entries.push({ monsterId: preset.monsterId, frozen: false });
+      continue;
+    }
+    const excluded = entries.map((entry) => entry.monsterId);
+    const monsterId = pickMonsterId(pool, excluded);
+    entries.push({ monsterId, frozen: false });
+  }
+  return entries;
+}
+
+function rerollSingleShopEntry(entries, slotIndex) {
+  if (slotIndex < 0 || slotIndex >= entries.length) return entries;
+  const next = entries.map((entry) => ({ ...entry }));
+  const excluded = next
+    .map((entry, idx) => (idx === slotIndex ? null : entry.monsterId))
+    .filter(Boolean);
+  next[slotIndex] = { monsterId: pickMonsterId(MONSTERS, excluded), frozen: false };
+  return next;
+}
+
+function rerollShopEntriesInPhase(entries) {
+  const next = entries.map((entry) => ({ ...entry }));
+  const placedIds = [];
+  for (let i = 0; i < next.length; i += 1) {
+    if (next[i].frozen) {
+      placedIds.push(next[i].monsterId);
+      continue;
+    }
+    const monsterId = pickMonsterId(MONSTERS, placedIds);
+    next[i] = { monsterId, frozen: false };
+    placedIds.push(monsterId);
+  }
+  return next;
+}
+
+function refreshShopEntriesForNextBuild(entries) {
+  return rollShopEntries(MONSTERS, entries.length, entries);
+}
+
 function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
   const candidates = [...pool];
   for (let i = candidates.length - 1; i > 0; i -= 1) {
@@ -90,6 +143,42 @@ function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
     [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
   return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((classData) => classData.id);
+}
+
+function countOwnedClass(classId) {
+  return gameState.classSlots.filter((ownedId) => ownedId === classId).length;
+}
+
+function canPickClass(classId) {
+  const classData = CLASS_CHOICES.find((c) => c.id === classId);
+  if (!classData) return { ok: false, message: "不正な職業です。" };
+  if (gameState.classSlots.length >= gameState.maxClassSlots) {
+    return { ok: false, message: "職業スロットが上限です。" };
+  }
+  const duplicateCount = countOwnedClass(classId);
+  if (classData.stackable === false && duplicateCount > 0) {
+    return { ok: false, message: "この経済系職業は重複できません。" };
+  }
+  if (duplicateCount >= gameState.maxDuplicatePerClass) {
+    return { ok: false, message: "同じ職業はこれ以上選べません。" };
+  }
+  return { ok: true, message: "" };
+}
+
+function enterBuildPhaseFromReward() {
+  const beastTamerCount = countOwnedClass("beast_tamer");
+  if (beastTamerCount > 0) {
+    gameState.coins += beastTamerCount * 2;
+  }
+  gameState.phase = "build";
+  resetBuildUiState();
+  gameState.shopChoices = refreshShopEntriesForNextBuild(gameState.shopChoices);
+  gameState.monsterRerollCost = REROLL_INITIAL_COST;
+  gameState.enemy = {
+    name: `ラウンド${gameState.round}の敵`,
+    hp: 10 + gameState.round * 2,
+    atk: 2 + Math.floor(gameState.round / 2)
+  };
 }
 
 function update(action, payload = {}) {
@@ -137,9 +226,12 @@ function update(action, payload = {}) {
       return;
     }
     case "buyMonster": {
-      const monster = MONSTERS.find((m) => m.id === payload.monsterId);
+      const slotIndex = Number(payload.slotIndex);
+      if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
+      const entry = gameState.shopChoices[slotIndex];
+      const monster = MONSTERS.find((m) => m.id === entry?.monsterId);
       if (!monster || gameState.phase !== "build") return;
-      if (!gameState.shopChoices.includes(monster.id)) return;
+      if (payload.monsterId && payload.monsterId !== monster.id) return;
       gameState.selectedMonsterId = monster.id;
       gameState.selectedSource = "shop";
       gameState.selectedSlotIndex = null;
@@ -173,6 +265,27 @@ function update(action, payload = {}) {
       gameState.coins -= monster.cost;
       gameState.reels[emptyIndex] = monster.id;
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
+      gameState.shopChoices = rerollSingleShopEntry(gameState.shopChoices, slotIndex);
+      return;
+    }
+    case "toggleShopFreeze": {
+      if (gameState.phase !== "build") return;
+      const slotIndex = Number(payload.slotIndex);
+      if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
+      const entry = gameState.shopChoices[slotIndex];
+      gameState.shopChoices[slotIndex] = { ...entry, frozen: !entry.frozen };
+      return;
+    }
+    case "rerollShop": {
+      if (gameState.phase !== "build") return;
+      if (gameState.coins < gameState.monsterRerollCost) {
+        gameState.buildStatus = { type: "warn", text: "リロールに必要なコインが不足しています" };
+        return;
+      }
+      gameState.coins -= gameState.monsterRerollCost;
+      gameState.shopChoices = rerollShopEntriesInPhase(gameState.shopChoices);
+      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
+      gameState.monsterRerollCost += 1;
       return;
     }
     case "rerollShop": {
@@ -339,26 +452,29 @@ function update(action, payload = {}) {
       const picked = CLASS_CHOICES.find((c) => c.id === payload.classId);
       if (!picked) return;
       if (!gameState.classChoices.includes(picked.id)) return;
-      const currentCount = gameState.classSlots.length;
-      const duplicateCount = gameState.classSlots.filter((classId) => classId === picked.id).length;
-      if (currentCount >= gameState.maxClassSlots) {
-        alert("職業スロットが上限です。");
-        return;
-      }
-      if (duplicateCount >= gameState.maxDuplicatePerClass) {
-        alert("同じ職業はこれ以上選べません。");
+      const classCheck = canPickClass(picked.id);
+      if (!classCheck.ok) {
+        alert(classCheck.message);
         return;
       }
       gameState.classSlots.push(picked.id);
-      gameState.phase = "build";
-      resetBuildUiState();
-      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
-      gameState.monsterRerollCost = REROLL_INITIAL_COST;
-      gameState.enemy = {
-        name: `ラウンド${gameState.round}の敵`,
-        hp: 10 + gameState.round * 2,
-        atk: 2 + Math.floor(gameState.round / 2)
-      };
+      enterBuildPhaseFromReward();
+      return;
+    }
+    case "skipClassSelection": {
+      if (gameState.phase !== "reward") return;
+      enterBuildPhaseFromReward();
+      return;
+    }
+    case "rerollClassChoices": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.coins < gameState.classRerollCost) {
+        alert("リロールに必要なコインが不足しています。");
+        return;
+      }
+      gameState.coins -= gameState.classRerollCost;
+      gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+      gameState.classRerollCost += 1;
       return;
     }
     case "rerollClassChoices": {
@@ -438,6 +554,11 @@ function calcDamageBreakdown(grid, classSlots = []) {
   classSlots.forEach((classId) => {
     if (classId === "slime_master" && counts.slime >= 3) bonusDamage += 1;
     if (classId === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+    if (classId === "berserker") {
+      const summonedCount = grid.filter((id) => id !== null).length;
+      bonusDamage += summonedCount;
+    }
+    if (classId === "lucky_strike" && (baseDamage + bonusDamage) % 2 === 1) bonusDamage += 2;
   });
 
   return {
@@ -537,9 +658,9 @@ function getCurrentClassInfo(classSlots = []) {
 }
 
 function renderBuildPhase() {
-  const visibleShopMonsters = gameState.shopChoices
-    .map((id) => monsterById(id))
-    .filter(Boolean);
+  const visibleShopEntries = gameState.shopChoices
+    .map((entry, index) => ({ ...entry, index, monster: monsterById(entry.monsterId) }))
+    .filter((entry) => entry.monster);
   const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
   const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
@@ -577,14 +698,17 @@ function renderBuildPhase() {
               ${buildStatus.text}
             </div>
             <div class="shop-grid">
-              ${visibleShopMonsters.map(
-                (m) => `
-                <article class="card ${m.cls} ${
-                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === m.id ? "build-selected-shop" : ""
-                }" data-act="select-shop" data-mid="${m.id}">
-                  <h4>${m.name}</h4>
-                  <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
-                  <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
+              ${visibleShopEntries.map(
+                (entry) => `
+                <article class="card ${entry.monster.cls} ${entry.frozen ? "shop-frozen" : ""} ${
+                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
+                }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                    <h4>${entry.monster.name}</h4>
+                    <button class="small btn-secondary" data-act="toggle-freeze" data-slot-index="${entry.index}">${entry.frozen ? "固定中" : "固定"}</button>
+                  </div>
+                  <div class="stats">コスト ${entry.monster.cost} / HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
+                  <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
               ).join("")}
             </div>
@@ -683,7 +807,27 @@ function bindBuildEvents() {
 
   app.querySelectorAll("[data-act='buy']").forEach((btn) => {
     btn.addEventListener("click", () => {
-      update("buyMonster", { monsterId: btn.dataset.mid });
+      update("buyMonster", { monsterId: btn.dataset.mid, slotIndex: Number(btn.dataset.slotIndex) });
+      render();
+    });
+  });
+
+  app.querySelector("[data-act='reroll-shop']")?.addEventListener("click", () => {
+    update("rerollShop");
+    render();
+  });
+
+  app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target?.closest("[data-act='buy']") || event.target?.closest("[data-act='toggle-freeze']")) return;
+      update("selectShopMonster", { monsterId: card.dataset.mid });
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-act='toggle-freeze']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      update("toggleShopFreeze", { slotIndex: Number(btn.dataset.slotIndex) });
       render();
     });
   });
@@ -932,6 +1076,7 @@ function renderRewardPhase() {
   const visibleClassChoices = gameState.classChoices
     .map((id) => CLASS_CHOICES.find((c) => c.id === id))
     .filter(Boolean);
+  const classSlotFull = gameState.classSlots.length >= gameState.maxClassSlots;
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
@@ -947,15 +1092,27 @@ function renderRewardPhase() {
           <h3>クラスを1つ選択してください</h3>
           <button class="small btn-secondary" data-act="reroll-class">リロール (${gameState.classRerollCost}コイン)</button>
         </div>
+        ${
+          classSlotFull
+            ? '<p class="muted">職業スロットが上限です。「スキップ」で次のビルドへ進んでください。</p>'
+            : ""
+        }
         <div class="choices">
           ${visibleClassChoices.map(
-            (c) => `
+            (c) => {
+              const classCheck = canPickClass(c.id);
+              return `
             <article class="choice">
               <h4>${c.name}</h4>
               <p class="muted">${c.desc}</p>
-              <button class="btn-secondary" data-act="pick" data-cid="${c.id}">このクラスを選ぶ</button>
-            </article>`
+              <button class="btn-secondary" data-act="pick" data-cid="${c.id}" ${classCheck.ok ? "" : "disabled"}>このクラスを選ぶ</button>
+              ${classCheck.ok ? "" : `<p class="muted" style="margin-top:6px;">${classCheck.message}</p>`}
+            </article>`;
+            }
           ).join("")}
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+          <button class="btn-secondary" data-act="skip-class">スキップ</button>
         </div>
       </section>
     </div>
@@ -969,6 +1126,10 @@ function renderRewardPhase() {
   });
   app.querySelector("[data-act='reroll-class']")?.addEventListener("click", () => {
     update("rerollClassChoices");
+    render();
+  });
+  app.querySelector("[data-act='skip-class']")?.addEventListener("click", () => {
+    update("skipClassSelection");
     render();
   });
 }
