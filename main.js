@@ -27,9 +27,10 @@ const ROUTE_CHOICES = [
 
 const CONFIG = {
   COMBO: {
-    PAIR_BONUS: 1,
-    TRIPLE_BONUS: 4,
-    FULL_GRID_BONUS: 2
+    ALIGN_TRIPLE_BONUS: 4
+  },
+  HABITAT: {
+    FOREST_SYNERGY_BONUS: 3
   },
   HABITAT_COLORS: {
     forest: "#3ea85a",
@@ -389,7 +390,7 @@ function update(action, payload = {}) {
       const dmg = damageBreakdown.totalDamage;
       gameState.battle.lastDamage = damageBreakdown;
       gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
-      const playerActions = buildPlayerResultMessages(gameState.battle.visibleGrid);
+      const playerActions = buildPlayerResultMessages(damageBreakdown);
       let enemyActions = [];
       let outcome = "continue";
       if (gameState.battle.enemyHp <= 0) {
@@ -415,9 +416,7 @@ function update(action, payload = {}) {
         outcomeText: getBattleOutcomeText(outcome)
       });
       gameState.battle.compactTurnSummary = buildCompactTurnSummary({
-        totalDamage: dmg,
-        comboBonusDamage: damageBreakdown.comboBonusDamage,
-        patternMessages: damageBreakdown.patternMessages,
+        playerActions,
         enemyAttack: enemyActions[0] || "敵は力をためている",
         outcome
       });
@@ -576,51 +575,37 @@ function getVisibleGridCounts(visibleGrid) {
   );
 }
 
-function buildPatternMessages(visibleGrid) {
-  const { idCounts, habitatCounts, filledCount } = getVisibleGridCounts(Array.isArray(visibleGrid) ? visibleGrid : []);
-  const messages = [];
-  const monsterIds = Object.keys(idCounts);
-
-  monsterIds
-    .filter((id) => idCounts[id] >= 3)
-    .forEach((id) => {
-      const monster = monsterById(id);
-      if (monster) messages.push(`トリプル${monster.name}！`);
-    });
-
-  if ((habitatCounts.forest ?? 0) >= 3) {
-    messages.push("森の仲間たち！");
-  }
-
-  if (filledCount === 9) {
-    messages.push("フルグリッド！");
-  }
-
-  monsterIds
-    .filter((id) => idCounts[id] >= 2)
-    .forEach((id) => {
-      const monster = monsterById(id);
-      if (monster) messages.push(`ダブル${monster.name}！`);
-    });
-
-  return { messages, idCounts, filledCount };
+function findAlignedTripleCombos(visibleGrid) {
+  const safeGrid = Array.isArray(visibleGrid) ? visibleGrid : [];
+  const comboLines = [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 4, 8],
+    [2, 4, 6]
+  ];
+  return comboLines.reduce((acc, positions) => {
+    const [a, b, c] = positions;
+    const idA = safeGrid[a];
+    if (!idA || idA !== safeGrid[b] || idA !== safeGrid[c]) return acc;
+    acc.push({ monsterId: idA, positions });
+    return acc;
+  }, []);
 }
 
-function calculateComboBonus(visibleGrid) {
-  const { idCounts, filledCount } = getVisibleGridCounts(Array.isArray(visibleGrid) ? visibleGrid : []);
-  let comboBonus = 0;
-  Object.values(idCounts).forEach((count) => {
-    if (count >= 2) comboBonus += CONFIG.COMBO.PAIR_BONUS;
-    if (count >= 3) comboBonus += CONFIG.COMBO.TRIPLE_BONUS;
-  });
-  if (filledCount === 9) comboBonus += CONFIG.COMBO.FULL_GRID_BONUS;
-  return comboBonus;
+function getGridPositionLabel(index) {
+  const labels = ["左上", "上", "右上", "左", "中央", "右", "左下", "下", "右下"];
+  return labels[index] ?? `#${index}`;
+}
+
+function formatComboPositionText(positions) {
+  return `（${positions.map((index) => getGridPositionLabel(index)).join("・")}）`;
 }
 
 function calcDamageBreakdown(grid, classSlots = []) {
   const safeGrid = Array.isArray(grid) ? grid : [];
   let baseDamage = 0;
-  let bonusDamage = 0;
+  let classBonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
   safeGrid.forEach((id) => {
     if (!id) return;
@@ -631,39 +616,52 @@ function calcDamageBreakdown(grid, classSlots = []) {
   });
 
   classSlots.forEach((classId) => {
-    if (classId === "slime_master" && counts.slime >= 3) bonusDamage += 1;
-    if (classId === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+    if (classId === "slime_master" && counts.slime >= 3) classBonusDamage += 1;
+    if (classId === "necromancer") classBonusDamage += counts.skeleton + counts.zombie;
     if (classId === "berserker") {
       const summonedCount = safeGrid.filter((id) => id !== null).length;
-      bonusDamage += summonedCount;
+      classBonusDamage += summonedCount;
     }
-    if (classId === "lucky_strike" && (baseDamage + bonusDamage) % 2 === 1) bonusDamage += 2;
+    if (classId === "lucky_strike" && (baseDamage + classBonusDamage) % 2 === 1) classBonusDamage += 2;
   });
 
-  const comboBonusDamage = calculateComboBonus(safeGrid);
-  const patternResult = buildPatternMessages(safeGrid);
+  const comboTriggers = findAlignedTripleCombos(safeGrid);
+  const comboBonusDamage = comboTriggers.length * CONFIG.COMBO.ALIGN_TRIPLE_BONUS;
+  const { habitatCounts } = getVisibleGridCounts(safeGrid);
+  const habitatBonusDamage = (habitatCounts.forest ?? 0) >= 3 ? CONFIG.HABITAT.FOREST_SYNERGY_BONUS : 0;
+  const totalDamage = baseDamage + comboBonusDamage + habitatBonusDamage + classBonusDamage;
 
   return {
     baseDamage,
-    bonusDamage: bonusDamage + comboBonusDamage,
+    classBonusDamage,
     comboBonusDamage,
-    patternMessages: patternResult.messages,
-    totalDamage: baseDamage + bonusDamage + comboBonusDamage
+    habitatBonusDamage,
+    comboTriggers,
+    totalDamage
   };
 }
 
-function buildPlayerResultMessages(grid) {
-  const attackLines = grid
-    .filter((id) => id !== null)
-    .map((id) => {
-      const m = monsterById(id);
-      if (!m) return null;
-      return `${m.name}の攻撃 → 敵に${m.atk}ダメージ`;
-    })
-    .filter(Boolean);
+function buildPlayerResultMessages(damageBreakdown) {
+  if (!damageBreakdown) return ["味方の攻撃！ 0ダメージ", "合計0ダメージ！！"];
 
-  if (attackLines.length === 0) return ["攻撃できるモンスターがいない。"];
-  return attackLines;
+  const lines = [`味方の攻撃！ ${damageBreakdown.baseDamage}ダメージ`];
+  if (damageBreakdown.comboTriggers.length > 0) {
+    lines.push("連携コンボ！");
+    damageBreakdown.comboTriggers.forEach((trigger) => {
+      const monster = monsterById(trigger.monsterId);
+      const name = monster?.name ?? trigger.monsterId;
+      lines.push(`トリプル${name}！！ +${CONFIG.COMBO.ALIGN_TRIPLE_BONUS}`);
+      lines.push(formatComboPositionText(trigger.positions));
+    });
+  }
+  if (damageBreakdown.habitatBonusDamage > 0) {
+    lines.push(`森の仲間たち！ +${damageBreakdown.habitatBonusDamage}`);
+  }
+  if (damageBreakdown.classBonusDamage > 0) {
+    lines.push(`クラス効果！ +${damageBreakdown.classBonusDamage}`);
+  }
+  lines.push(`合計${damageBreakdown.totalDamage}ダメージ！！`);
+  return lines;
 }
 
 function buildEnemyResultMessages(enemyAtk) {
@@ -686,12 +684,6 @@ function buildHabitatPanelStyle(monster) {
     return `background:linear-gradient(135deg, ${colorA} 0%, ${colorA} 48%, ${colorB} 52%, ${colorB} 100%);`;
   }
   return "background:#24354a;";
-}
-
-function getHabitatLabel(monster) {
-  const habitats = getMonsterHabitats(monster);
-  if (habitats.length === 0) return "生息地: なし";
-  return `生息地: ${habitats.join(" / ")}`;
 }
 
 function render() {
@@ -815,7 +807,6 @@ function renderBuildPhase() {
                     <h4>${entry.monster.name}</h4>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
-                  <div class="habitat-label">${getHabitatLabel(entry.monster)}</div>
                   <div class="stats">コスト ${entry.monster.cost} / HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
                   <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
@@ -889,7 +880,6 @@ function renderBuildPhase() {
                       ${selected.name}
                     </div>
                     <div class="habitat-panel" style="margin-top:8px;${buildHabitatPanelStyle(selected)}"></div>
-                    <p class="habitat-label">${getHabitatLabel(selected)}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
@@ -1009,12 +999,8 @@ function getBattleStatusText(subPhase) {
   return "";
 }
 
-function buildCompactTurnSummary({ totalDamage, comboBonusDamage, patternMessages = [], enemyAttack, outcome }) {
-  const lines = ["味方の攻撃！", `合計${totalDamage}ダメージ`];
-  if ((comboBonusDamage ?? 0) > 0) {
-    lines.push(`+${comboBonusDamage} combo`);
-  }
-  patternMessages.forEach((message) => lines.push(message));
+function buildCompactTurnSummary({ playerActions = [], enemyAttack, outcome }) {
+  const lines = [...playerActions];
   if (outcome === "victory") {
     lines.push("戦闘に勝利した！");
     return lines;
