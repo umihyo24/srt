@@ -988,6 +988,11 @@ function renderBuildPhase() {
   const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
   const pendingMonster = getUnitMonster(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
+  const showShopStatus =
+    buildStatus.type !== "info"
+    || buildStatus.text !== DEFAULT_BUILD_STATUS.text
+    || Boolean(gameState.pendingPlacement)
+    || Boolean(gameState.replacementConfirm);
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
 
   app.innerHTML = `
@@ -1006,17 +1011,21 @@ function renderBuildPhase() {
       <div class="build-layout">
         <div class="phase-root">
           <section class="panel">
-            <h3>ショップ</h3>
+            <div class="shop-header-row">
+              <h3>ショップ</h3>
+              <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
+            </div>
             <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
               <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
               配置先を選ぶ（手動配置）
             </label>
-            <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-              <button class="small btn-secondary" data-act="reroll-shop">リロール (${gameState.monsterRerollCost}コイン)</button>
-            </div>
-            <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
-              ${buildStatus.text}
-            </div>
+            ${
+              showShopStatus
+                ? `<div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
+                    ${buildStatus.text}
+                  </div>`
+                : ""
+            }
             <div class="shop-grid">
               ${visibleShopEntries.map(
                 (entry) => `
@@ -1030,20 +1039,18 @@ function renderBuildPhase() {
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
                   <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
-                  <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}で購入</button>
+                  <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}</button>
                 </article>`
               ).join("")}
             </div>
           </section>
 
           <section class="panel">
-            <h3>リール編集エリア（3リール×6段 = 18スロット）</h3>
             <div class="reel-grid">
               ${reels
                 .map(
                   (col, colIdx) => `
                 <div class="reel-col">
-                  <strong>リール${colIdx + 1}</strong>
                   ${col
                     .map((slotValue, rowIdx) => {
                       const absoluteIndex = rowIdx * 3 + colIdx;
@@ -1099,13 +1106,11 @@ function renderBuildPhase() {
                    <p>このモンスターをスロットに配置してください。</p>`
                 : selected
                   ? `<div class="monster-chip ${selected.cls} sp-${selected.species}">
-                      ${renderHabitatBand(selected, "habitat-band-chip")}
                       <span>${selected.name}${formatStar(selectedStar)}</span>
                     </div>
                     ${renderHabitatBand(selected, "habitat-panel")}
                     <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
-                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
                     ${isReelSelection ? `<p>マージモード: ${gameState.mergeMode ? "ON" : "OFF"}</p>` : ""}
                     ${

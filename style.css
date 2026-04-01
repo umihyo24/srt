@@ -91,6 +91,12 @@ button {
   font-size: 0.85rem;
 }
 
+.purchase-cost-btn {
+  padding: 9px 12px;
+  font-size: 0.9rem;
+  min-width: 78px;
+}
+
 /* Build phase */
 .build-layout {
   display: grid;
@@ -112,6 +118,18 @@ button {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.shop-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.shop-header-row h3 {
+  margin: 0;
 }
 
 .build-status-bar {
@@ -158,23 +176,6 @@ button {
   font-weight: 800;
   line-height: 1;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
-}
-
-.habitat-panel {
-  height: 14px;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-}
-
-.build-selected-shop {
-  border-color: #ffcf72;
-  box-shadow: inset 0 0 0 1px rgba(255, 207, 114, 0.45);
-}
-
-.shop-kept {
-  border-color: #7cd0ff;
-  box-shadow: inset 0 0 0 1px rgba(124, 208, 255, 0.35);
 }
 
 .habitat-panel {
