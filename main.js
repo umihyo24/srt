@@ -27,7 +27,7 @@ const INITIAL_STATE = () => ({
   hp: 12,
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
-  shopChoices: rollShopChoices(MONSTERS, 3),
+  shopChoices: rollShopEntries(MONSTERS, 3),
   monsterRerollCost: 4,
   selectedMonsterId: null,
   selectedSource: null, // shop | reel | null
@@ -85,6 +85,57 @@ function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
   return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((monster) => monster.id);
 }
 
+function pickMonsterId(pool, excludedIds = []) {
+  const ids = pool.map((monster) => monster.id);
+  const uniqueCandidates = ids.filter((id) => !excludedIds.includes(id));
+  const source = uniqueCandidates.length > 0 ? uniqueCandidates : ids;
+  return source[Math.floor(Math.random() * source.length)];
+}
+
+function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
+  const entries = [];
+  for (let i = 0; i < choiceCount; i += 1) {
+    const preset = baseEntries[i] ?? null;
+    if (preset && preset.frozen) {
+      entries.push({ monsterId: preset.monsterId, frozen: false });
+      continue;
+    }
+    const excluded = entries.map((entry) => entry.monsterId);
+    const monsterId = pickMonsterId(pool, excluded);
+    entries.push({ monsterId, frozen: false });
+  }
+  return entries;
+}
+
+function rerollSingleShopEntry(entries, slotIndex) {
+  if (slotIndex < 0 || slotIndex >= entries.length) return entries;
+  const next = entries.map((entry) => ({ ...entry }));
+  const excluded = next
+    .map((entry, idx) => (idx === slotIndex ? null : entry.monsterId))
+    .filter(Boolean);
+  next[slotIndex] = { monsterId: pickMonsterId(MONSTERS, excluded), frozen: false };
+  return next;
+}
+
+function rerollShopEntriesInPhase(entries) {
+  const next = entries.map((entry) => ({ ...entry }));
+  const placedIds = [];
+  for (let i = 0; i < next.length; i += 1) {
+    if (next[i].frozen) {
+      placedIds.push(next[i].monsterId);
+      continue;
+    }
+    const monsterId = pickMonsterId(MONSTERS, placedIds);
+    next[i] = { monsterId, frozen: false };
+    placedIds.push(monsterId);
+  }
+  return next;
+}
+
+function refreshShopEntriesForNextBuild(entries) {
+  return rollShopEntries(MONSTERS, entries.length, entries);
+}
+
 function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
   const candidates = [...pool];
   for (let i = candidates.length - 1; i > 0; i -= 1) {
@@ -121,7 +172,7 @@ function enterBuildPhaseFromReward() {
   }
   gameState.phase = "build";
   resetBuildUiState();
-  gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+  gameState.shopChoices = refreshShopEntriesForNextBuild(gameState.shopChoices);
   gameState.monsterRerollCost = REROLL_INITIAL_COST;
   gameState.enemy = {
     name: `ラウンド${gameState.round}の敵`,
@@ -175,9 +226,12 @@ function update(action, payload = {}) {
       return;
     }
     case "buyMonster": {
-      const monster = MONSTERS.find((m) => m.id === payload.monsterId);
+      const slotIndex = Number(payload.slotIndex);
+      if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
+      const entry = gameState.shopChoices[slotIndex];
+      const monster = MONSTERS.find((m) => m.id === entry?.monsterId);
       if (!monster || gameState.phase !== "build") return;
-      if (!gameState.shopChoices.includes(monster.id)) return;
+      if (payload.monsterId && payload.monsterId !== monster.id) return;
       gameState.selectedMonsterId = monster.id;
       gameState.selectedSource = "shop";
       gameState.selectedSlotIndex = null;
@@ -211,6 +265,15 @@ function update(action, payload = {}) {
       gameState.coins -= monster.cost;
       gameState.reels[emptyIndex] = monster.id;
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
+      gameState.shopChoices = rerollSingleShopEntry(gameState.shopChoices, slotIndex);
+      return;
+    }
+    case "toggleShopFreeze": {
+      if (gameState.phase !== "build") return;
+      const slotIndex = Number(payload.slotIndex);
+      if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
+      const entry = gameState.shopChoices[slotIndex];
+      gameState.shopChoices[slotIndex] = { ...entry, frozen: !entry.frozen };
       return;
     }
     case "rerollShop": {
@@ -220,7 +283,7 @@ function update(action, payload = {}) {
         return;
       }
       gameState.coins -= gameState.monsterRerollCost;
-      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+      gameState.shopChoices = rerollShopEntriesInPhase(gameState.shopChoices);
       gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
       gameState.monsterRerollCost += 1;
       return;
@@ -572,9 +635,9 @@ function getCurrentClassInfo(classSlots = []) {
 }
 
 function renderBuildPhase() {
-  const visibleShopMonsters = gameState.shopChoices
-    .map((id) => monsterById(id))
-    .filter(Boolean);
+  const visibleShopEntries = gameState.shopChoices
+    .map((entry, index) => ({ ...entry, index, monster: monsterById(entry.monsterId) }))
+    .filter((entry) => entry.monster);
   const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
   const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
@@ -612,14 +675,17 @@ function renderBuildPhase() {
               ${buildStatus.text}
             </div>
             <div class="shop-grid">
-              ${visibleShopMonsters.map(
-                (m) => `
-                <article class="card ${m.cls} ${
-                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === m.id ? "build-selected-shop" : ""
-                }" data-act="select-shop" data-mid="${m.id}">
-                  <h4>${m.name}</h4>
-                  <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
-                  <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
+              ${visibleShopEntries.map(
+                (entry) => `
+                <article class="card ${entry.monster.cls} ${entry.frozen ? "shop-frozen" : ""} ${
+                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
+                }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                    <h4>${entry.monster.name}</h4>
+                    <button class="small btn-secondary" data-act="toggle-freeze" data-slot-index="${entry.index}">${entry.frozen ? "固定中" : "固定"}</button>
+                  </div>
+                  <div class="stats">コスト ${entry.monster.cost} / HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
+                  <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
               ).join("")}
             </div>
@@ -718,7 +784,7 @@ function bindBuildEvents() {
 
   app.querySelectorAll("[data-act='buy']").forEach((btn) => {
     btn.addEventListener("click", () => {
-      update("buyMonster", { monsterId: btn.dataset.mid });
+      update("buyMonster", { monsterId: btn.dataset.mid, slotIndex: Number(btn.dataset.slotIndex) });
       render();
     });
   });
@@ -730,8 +796,15 @@ function bindBuildEvents() {
 
   app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
     card.addEventListener("click", (event) => {
-      if (event.target?.closest("[data-act='buy']")) return;
+      if (event.target?.closest("[data-act='buy']") || event.target?.closest("[data-act='toggle-freeze']")) return;
       update("selectShopMonster", { monsterId: card.dataset.mid });
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-act='toggle-freeze']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      update("toggleShopFreeze", { slotIndex: Number(btn.dataset.slotIndex) });
       render();
     });
   });
