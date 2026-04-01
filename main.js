@@ -1,15 +1,15 @@
 const MONSTERS = [
-  { id: "slime", name: "スライム", cost: 1, hp: 1, atk: 1, cls: "m-slime" },
-  { id: "skeleton", name: "スケルトン", cost: 2, hp: 2, atk: 2, cls: "m-skeleton" },
-  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie" },
-  { id: "bat", name: "バット", cost: 1, hp: 1, atk: 1, cls: "m-bat" },
-  { id: "wolf", name: "ウルフ", cost: 2, hp: 2, atk: 3, cls: "m-wolf" },
-  { id: "goblin", name: "ゴブリン", cost: 1, hp: 2, atk: 1, cls: "m-goblin" },
-  { id: "imp", name: "インプ", cost: 2, hp: 1, atk: 3, cls: "m-imp" },
-  { id: "knight", name: "ナイト", cost: 3, hp: 3, atk: 3, cls: "m-knight" },
-  { id: "ghost", name: "ゴースト", cost: 2, hp: 1, atk: 2, cls: "m-ghost" },
-  { id: "mushroom", name: "マッシュルーム", cost: 1, hp: 2, atk: 1, cls: "m-mushroom" },
-  { id: "lizard", name: "リザード", cost: 2, hp: 2, atk: 2, cls: "m-lizard" }
+  { id: "slime", name: "スライム", cost: 1, hp: 1, atk: 1, cls: "m-slime", habitats: ["water"] },
+  { id: "skeleton", name: "スケルトン", cost: 2, hp: 2, atk: 2, cls: "m-skeleton", habitats: ["cave"] },
+  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie", habitats: ["swamp", "cave"] },
+  { id: "bat", name: "バット", cost: 1, hp: 1, atk: 1, cls: "m-bat", habitats: ["cave"] },
+  { id: "wolf", name: "ウルフ", cost: 2, hp: 2, atk: 3, cls: "m-wolf", habitats: ["forest"] },
+  { id: "goblin", name: "ゴブリン", cost: 1, hp: 2, atk: 1, cls: "m-goblin", habitats: ["forest", "swamp"] },
+  { id: "imp", name: "インプ", cost: 2, hp: 1, atk: 3, cls: "m-imp", habitats: ["volcano"] },
+  { id: "knight", name: "ナイト", cost: 3, hp: 3, atk: 3, cls: "m-knight", habitats: ["forest"] },
+  { id: "ghost", name: "ゴースト", cost: 2, hp: 1, atk: 2, cls: "m-ghost", habitats: ["cave"] },
+  { id: "mushroom", name: "マッシュルーム", cost: 1, hp: 2, atk: 1, cls: "m-mushroom", habitats: ["forest", "swamp"] },
+  { id: "lizard", name: "リザード", cost: 2, hp: 2, atk: 2, cls: "m-lizard", habitats: ["swamp", "water"] }
 ];
 
 const CLASS_CHOICES = [
@@ -24,6 +24,21 @@ const ROUTE_CHOICES = [
   { id: "normal", label: "通常ルート", enemyHpBonus: 0, enemyAtkBonus: 0, nextWinBonusCoins: 0 },
   { id: "strong", label: "強敵ルート", enemyHpBonus: 4, enemyAtkBonus: 1, nextWinBonusCoins: 4 }
 ];
+
+const CONFIG = {
+  COMBO: {
+    PAIR_BONUS: 1,
+    TRIPLE_BONUS: 4,
+    FULL_GRID_BONUS: 2
+  },
+  HABITAT_COLORS: {
+    forest: "#3ea85a",
+    water: "#3f8bff",
+    cave: "#8d68d8",
+    swamp: "#6f7e34",
+    volcano: "#d96b38"
+  }
+};
 
 const INITIAL_STATE = () => ({
   phase: "build", // build | battle | reward | route | gameover
@@ -53,7 +68,7 @@ const INITIAL_STATE = () => ({
     visibleGrid: Array(9).fill(null),
     gridCols: 3,
     gridRows: 3,
-    lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
+    lastDamage: { baseDamage: 0, bonusDamage: 0, comboBonusDamage: 0, totalDamage: 0 },
     log: [],
     logEntries: [],
     compactTurnSummary: ["スピンして戦闘を開始してください。"],
@@ -350,7 +365,7 @@ function update(action, payload = {}) {
         visibleGrid: spinVisibleGrid(gameState.reels),
         gridCols: 3,
         gridRows: 3,
-        lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
+        lastDamage: { baseDamage: 0, bonusDamage: 0, comboBonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
         logEntries: [],
         compactTurnSummary: ["スピンして戦闘を開始してください。"],
@@ -401,6 +416,8 @@ function update(action, payload = {}) {
       });
       gameState.battle.compactTurnSummary = buildCompactTurnSummary({
         totalDamage: dmg,
+        comboBonusDamage: damageBreakdown.comboBonusDamage,
+        patternMessages: damageBreakdown.patternMessages,
         enemyAttack: enemyActions[0] || "敵は力をためている",
         outcome
       });
@@ -536,32 +553,102 @@ function spinVisibleGrid(reels) {
   return grid;
 }
 
+function getMonsterHabitats(monster) {
+  if (!monster || !Array.isArray(monster.habitats)) return [];
+  if (monster.habitats.length < 1 || monster.habitats.length > 2) return [];
+  return monster.habitats.filter((habitat) => Boolean(CONFIG.HABITAT_COLORS[habitat]));
+}
+
+function getVisibleGridCounts(visibleGrid) {
+  return visibleGrid.reduce(
+    (acc, id) => {
+      if (!id) return acc;
+      const monster = monsterById(id);
+      if (!monster) return acc;
+      acc.idCounts[id] = (acc.idCounts[id] ?? 0) + 1;
+      acc.filledCount += 1;
+      getMonsterHabitats(monster).forEach((habitat) => {
+        acc.habitatCounts[habitat] = (acc.habitatCounts[habitat] ?? 0) + 1;
+      });
+      return acc;
+    },
+    { idCounts: {}, habitatCounts: {}, filledCount: 0 }
+  );
+}
+
+function buildPatternMessages(visibleGrid) {
+  const { idCounts, habitatCounts, filledCount } = getVisibleGridCounts(Array.isArray(visibleGrid) ? visibleGrid : []);
+  const messages = [];
+  const monsterIds = Object.keys(idCounts);
+
+  monsterIds
+    .filter((id) => idCounts[id] >= 3)
+    .forEach((id) => {
+      const monster = monsterById(id);
+      if (monster) messages.push(`トリプル${monster.name}！`);
+    });
+
+  if ((habitatCounts.forest ?? 0) >= 3) {
+    messages.push("森の仲間たち！");
+  }
+
+  if (filledCount === 9) {
+    messages.push("フルグリッド！");
+  }
+
+  monsterIds
+    .filter((id) => idCounts[id] >= 2)
+    .forEach((id) => {
+      const monster = monsterById(id);
+      if (monster) messages.push(`ダブル${monster.name}！`);
+    });
+
+  return { messages, idCounts, filledCount };
+}
+
+function calculateComboBonus(visibleGrid) {
+  const { idCounts, filledCount } = getVisibleGridCounts(Array.isArray(visibleGrid) ? visibleGrid : []);
+  let comboBonus = 0;
+  Object.values(idCounts).forEach((count) => {
+    if (count >= 2) comboBonus += CONFIG.COMBO.PAIR_BONUS;
+    if (count >= 3) comboBonus += CONFIG.COMBO.TRIPLE_BONUS;
+  });
+  if (filledCount === 9) comboBonus += CONFIG.COMBO.FULL_GRID_BONUS;
+  return comboBonus;
+}
+
 function calcDamageBreakdown(grid, classSlots = []) {
+  const safeGrid = Array.isArray(grid) ? grid : [];
   let baseDamage = 0;
   let bonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
-  grid.forEach((id) => {
+  safeGrid.forEach((id) => {
     if (!id) return;
     const m = MONSTERS.find((x) => x.id === id);
     if (!m) return;
     baseDamage += m.atk;
-    counts[id] += 1;
+    if (Object.hasOwn(counts, id)) counts[id] += 1;
   });
 
   classSlots.forEach((classId) => {
     if (classId === "slime_master" && counts.slime >= 3) bonusDamage += 1;
     if (classId === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
     if (classId === "berserker") {
-      const summonedCount = grid.filter((id) => id !== null).length;
+      const summonedCount = safeGrid.filter((id) => id !== null).length;
       bonusDamage += summonedCount;
     }
     if (classId === "lucky_strike" && (baseDamage + bonusDamage) % 2 === 1) bonusDamage += 2;
   });
 
+  const comboBonusDamage = calculateComboBonus(safeGrid);
+  const patternResult = buildPatternMessages(safeGrid);
+
   return {
     baseDamage,
-    bonusDamage,
-    totalDamage: baseDamage + bonusDamage
+    bonusDamage: bonusDamage + comboBonusDamage,
+    comboBonusDamage,
+    patternMessages: patternResult.messages,
+    totalDamage: baseDamage + bonusDamage + comboBonusDamage
   };
 }
 
@@ -585,6 +672,26 @@ function buildEnemyResultMessages(enemyAtk) {
 
 function monsterById(id) {
   return MONSTERS.find((m) => m.id === id) || null;
+}
+
+function buildHabitatPanelStyle(monster) {
+  const habitats = getMonsterHabitats(monster);
+  if (habitats.length === 1) {
+    const color = CONFIG.HABITAT_COLORS[habitats[0]];
+    return `background:${color};`;
+  }
+  if (habitats.length === 2) {
+    const colorA = CONFIG.HABITAT_COLORS[habitats[0]];
+    const colorB = CONFIG.HABITAT_COLORS[habitats[1]];
+    return `background:linear-gradient(135deg, ${colorA} 0%, ${colorA} 48%, ${colorB} 52%, ${colorB} 100%);`;
+  }
+  return "background:#24354a;";
+}
+
+function getHabitatLabel(monster) {
+  const habitats = getMonsterHabitats(monster);
+  if (habitats.length === 0) return "生息地: なし";
+  return `生息地: ${habitats.join(" / ")}`;
 }
 
 function render() {
@@ -703,10 +810,12 @@ function renderBuildPhase() {
                 <article class="card ${entry.monster.cls} ${entry.kept ? "shop-kept" : ""} ${
                   gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
                 }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
+                  <div class="habitat-panel" style="${buildHabitatPanelStyle(entry.monster)}"></div>
                   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
                     <h4>${entry.monster.name}</h4>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
+                  <div class="habitat-label">${getHabitatLabel(entry.monster)}</div>
                   <div class="stats">コスト ${entry.monster.cost} / HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
                   <button class="small btn-primary" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>購入</button>
                 </article>`
@@ -732,7 +841,14 @@ function renderBuildPhase() {
                         pendingMonster ? 'style="outline:2px solid #ffcc7a;cursor:pointer;"' : ""
                       }>
                         <div class="${isSelectedSlot ? "build-selected-slot" : ""}" style="width:100%;padding:2px;border-radius:8px;">
-                          ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
+                          ${
+                            monster
+                              ? `<div class="monster-chip ${monster.cls}">
+                                  <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(monster)}"></div>
+                                  ${monster.name}
+                                </div>`
+                              : "空"
+                          }
                         </div>
                       </div>`;
                     })
@@ -768,7 +884,12 @@ function renderBuildPhase() {
               pendingMonster
                 ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
                 : selected
-                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div>
+                  ? `<div class="monster-chip ${selected.cls}">
+                      <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(selected)}"></div>
+                      ${selected.name}
+                    </div>
+                    <div class="habitat-panel" style="margin-top:8px;${buildHabitatPanelStyle(selected)}"></div>
+                    <p class="habitat-label">${getHabitatLabel(selected)}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
@@ -888,8 +1009,12 @@ function getBattleStatusText(subPhase) {
   return "";
 }
 
-function buildCompactTurnSummary({ totalDamage, enemyAttack, outcome }) {
+function buildCompactTurnSummary({ totalDamage, comboBonusDamage, patternMessages = [], enemyAttack, outcome }) {
   const lines = ["味方の攻撃！", `合計${totalDamage}ダメージ`];
+  if ((comboBonusDamage ?? 0) > 0) {
+    lines.push(`+${comboBonusDamage} combo`);
+  }
+  patternMessages.forEach((message) => lines.push(message));
   if (outcome === "victory") {
     lines.push("戦闘に勝利した！");
     return lines;
@@ -908,7 +1033,14 @@ function renderBattleGridCells() {
   return gameState.battle.visibleGrid
     .map((id) => {
       const m = monsterById(id);
-      return `<div class="slot battle-cell">${m ? `<div class="monster-chip ${m.cls}">${m.name}</div>` : '<div class="muted">Empty</div>'}</div>`;
+      return `<div class="slot battle-cell">${
+        m
+          ? `<div class="monster-chip ${m.cls}">
+              <div class="monster-habitat-mini" style="${buildHabitatPanelStyle(m)}"></div>
+              ${m.name}
+            </div>`
+          : '<div class="muted">Empty</div>'
+      }</div>`;
     })
     .join("");
 }

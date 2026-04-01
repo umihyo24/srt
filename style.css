@@ -144,6 +144,19 @@ button {
   padding: 10px;
 }
 
+.habitat-panel {
+  height: 14px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.habitat-label {
+  color: #d3e7ff;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+
 .build-selected-shop {
   border-color: #ffcf72;
   box-shadow: inset 0 0 0 1px rgba(255, 207, 114, 0.45);
@@ -194,6 +207,18 @@ button {
   padding: 6px;
   text-align: center;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.monster-habitat-mini {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  flex: 0 0 14px;
 }
 
 .m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }
