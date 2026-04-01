@@ -990,12 +990,16 @@ function renderRewardPhase() {
         }
         <div class="choices">
           ${visibleClassChoices.map(
-            (c) => `
+            (c) => {
+              const classCheck = canPickClass(c.id);
+              return `
             <article class="choice">
               <h4>${c.name}</h4>
               <p class="muted">${c.desc}</p>
-              <button class="btn-secondary" data-act="pick" data-cid="${c.id}">このクラスを選ぶ</button>
-            </article>`
+              <button class="btn-secondary" data-act="pick" data-cid="${c.id}" ${classCheck.ok ? "" : "disabled"}>このクラスを選ぶ</button>
+              ${classCheck.ok ? "" : `<p class="muted" style="margin-top:6px;">${classCheck.message}</p>`}
+            </article>`;
+            }
           ).join("")}
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:10px;">
