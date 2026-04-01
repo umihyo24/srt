@@ -220,6 +220,14 @@ button {
 .m-imp { background: rgba(255, 120, 120, 0.2); border: 1px solid #d36d6d; }
 .m-knight { background: rgba(190, 190, 210, 0.2); border: 1px solid #9da3b6; }
 
+.monster-chip.sp-slime { background: rgba(72, 204, 116, 0.18); border: 1px solid #5fd07f; }
+.monster-chip.sp-undead { background: rgba(118, 106, 166, 0.24); border: 1px solid #9482d8; }
+.monster-chip.sp-beast { background: rgba(74, 152, 109, 0.24); border: 1px solid #63b986; }
+.monster-chip.sp-humanoid { background: rgba(88, 122, 173, 0.24); border: 1px solid #7eafe6; }
+.monster-chip.sp-demon { background: rgba(170, 82, 82, 0.24); border: 1px solid #d18282; }
+.monster-chip.sp-plant { background: rgba(98, 146, 70, 0.24); border: 1px solid #8bc35f; }
+.monster-chip.sp-reptile { background: rgba(90, 136, 118, 0.24); border: 1px solid #7fc5a9; }
+
 .panel {
   padding: 12px;
 }

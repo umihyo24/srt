@@ -1,15 +1,15 @@
 const MONSTERS = [
-  { id: "slime", name: "スライム", cost: 1, hp: 1, atk: 1, cls: "m-slime", habitats: ["water"] },
-  { id: "skeleton", name: "スケルトン", cost: 2, hp: 2, atk: 2, cls: "m-skeleton", habitats: ["cave"] },
-  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie", habitats: ["swamp", "cave"] },
-  { id: "bat", name: "バット", cost: 1, hp: 1, atk: 1, cls: "m-bat", habitats: ["cave"] },
-  { id: "wolf", name: "ウルフ", cost: 2, hp: 2, atk: 3, cls: "m-wolf", habitats: ["forest"] },
-  { id: "goblin", name: "ゴブリン", cost: 1, hp: 2, atk: 1, cls: "m-goblin", habitats: ["forest", "swamp"] },
-  { id: "imp", name: "インプ", cost: 2, hp: 1, atk: 3, cls: "m-imp", habitats: ["volcano"] },
-  { id: "knight", name: "ナイト", cost: 3, hp: 3, atk: 3, cls: "m-knight", habitats: ["forest"] },
-  { id: "ghost", name: "ゴースト", cost: 2, hp: 1, atk: 2, cls: "m-ghost", habitats: ["cave"] },
-  { id: "mushroom", name: "マッシュルーム", cost: 1, hp: 2, atk: 1, cls: "m-mushroom", habitats: ["forest", "swamp"] },
-  { id: "lizard", name: "リザード", cost: 2, hp: 2, atk: 2, cls: "m-lizard", habitats: ["swamp", "water"] }
+  { id: "slime", name: "スライム", species: "slime", cost: 1, hp: 1, atk: 1, cls: "m-slime", habitats: ["water"] },
+  { id: "skeleton", name: "スケルトン", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-skeleton", habitats: ["cave"] },
+  { id: "zombie", name: "ゾンビ", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-zombie", habitats: ["swamp", "cave"] },
+  { id: "bat", name: "バット", species: "beast", cost: 1, hp: 1, atk: 1, cls: "m-bat", habitats: ["cave"] },
+  { id: "wolf", name: "ウルフ", species: "beast", cost: 2, hp: 2, atk: 3, cls: "m-wolf", habitats: ["forest"] },
+  { id: "goblin", name: "ゴブリン", species: "humanoid", cost: 1, hp: 2, atk: 1, cls: "m-goblin", habitats: ["forest", "swamp"] },
+  { id: "imp", name: "インプ", species: "demon", cost: 2, hp: 1, atk: 3, cls: "m-imp", habitats: ["volcano"] },
+  { id: "knight", name: "ナイト", species: "humanoid", cost: 3, hp: 3, atk: 3, cls: "m-knight", habitats: ["forest"] },
+  { id: "ghost", name: "ゴースト", species: "undead", cost: 2, hp: 1, atk: 2, cls: "m-ghost", habitats: ["cave"] },
+  { id: "mushroom", name: "マッシュルーム", species: "plant", cost: 1, hp: 2, atk: 1, cls: "m-mushroom", habitats: ["forest", "swamp"] },
+  { id: "lizard", name: "リザード", species: "reptile", cost: 2, hp: 2, atk: 2, cls: "m-lizard", habitats: ["swamp", "water"] }
 ];
 
 const CLASS_CHOICES = [
@@ -32,6 +32,10 @@ const CONFIG = {
   HABITAT: {
     FOREST_SYNERGY_BONUS: 3
   },
+  MERGE: {
+    MAX_STAR: 3,
+    ATK_PER_EXTRA_STAR: 1
+  },
   HABITAT_COLORS: {
     forest: "#3ea85a",
     water: "#3f8bff",
@@ -51,9 +55,11 @@ const INITIAL_STATE = () => ({
   shopChoices: rollShopEntries(MONSTERS, 3),
   monsterRerollCost: 4,
   selectedMonsterId: null,
+  selectedMonsterStar: 1,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
   pendingPlacement: null,
+  pendingPurchaseSlotIndex: null,
   classSlots: [],
   maxClassSlots: 3,
   maxDuplicatePerClass: 2,
@@ -97,6 +103,32 @@ function resetBuildUiState() {
 function getSellValue(monster) {
   if (!monster) return 0;
   return Math.floor(monster.cost / 2);
+}
+
+function toReelUnit(slotValue) {
+  if (!slotValue) return null;
+  if (typeof slotValue === "string") return { id: slotValue, star: 1 };
+  if (typeof slotValue !== "object" || !slotValue.id) return null;
+  const star = Math.max(1, Math.min(CONFIG.MERGE.MAX_STAR, Number(slotValue.star) || 1));
+  return { id: slotValue.id, star };
+}
+
+function createUnit(id, star = 1) {
+  return toReelUnit({ id, star });
+}
+
+function getUnitMonster(slotValue) {
+  const unit = toReelUnit(slotValue);
+  return unit ? monsterById(unit.id) : null;
+}
+
+function getUnitStar(slotValue) {
+  const unit = toReelUnit(slotValue);
+  return unit?.star ?? 1;
+}
+
+function formatStar(star = 1) {
+  return `☆${Math.max(1, star)}`;
 }
 
 function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
@@ -231,6 +263,7 @@ function update(action, payload = {}) {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster) return;
       gameState.selectedMonsterId = monster.id;
+      gameState.selectedMonsterStar = 1;
       gameState.selectedSource = "shop";
       gameState.selectedSlotIndex = null;
       return;
@@ -239,9 +272,10 @@ function update(action, payload = {}) {
       if (gameState.phase !== "build") return;
       const idx = payload.index;
       if (idx < 0 || idx >= gameState.reels.length) return;
-      const id = gameState.reels[idx];
-      if (!id) return;
-      gameState.selectedMonsterId = id;
+      const unit = toReelUnit(gameState.reels[idx]);
+      if (!unit) return;
+      gameState.selectedMonsterId = unit.id;
+      gameState.selectedMonsterStar = unit.star;
       gameState.selectedSource = "reel";
       gameState.selectedSlotIndex = idx;
       return;
@@ -249,6 +283,7 @@ function update(action, payload = {}) {
     case "clearSelection": {
       if (gameState.phase !== "build") return;
       gameState.selectedMonsterId = null;
+      gameState.selectedMonsterStar = 1;
       gameState.selectedSource = null;
       gameState.selectedSlotIndex = null;
       return;
@@ -261,6 +296,7 @@ function update(action, payload = {}) {
       if (!monster || gameState.phase !== "build") return;
       if (payload.monsterId && payload.monsterId !== monster.id) return;
       gameState.selectedMonsterId = monster.id;
+      gameState.selectedMonsterStar = 1;
       gameState.selectedSource = "shop";
       gameState.selectedSlotIndex = null;
       if (gameState.pendingPlacement !== null) {
@@ -277,21 +313,26 @@ function update(action, payload = {}) {
         return;
       }
       gameState.selectedMonsterId = monster.id;
+      gameState.selectedMonsterStar = 1;
       if (gameState.buildManualPlacement) {
         gameState.coins -= monster.cost;
-        gameState.pendingPlacement = monster.id;
+        gameState.pendingPlacement = createUnit(monster.id, 1);
+        gameState.pendingPurchaseSlotIndex = slotIndex;
         gameState.buildStatus = { type: "info", text: `配置待ち: ${monster.name}を18スロットのどこかへ配置してください` };
         return;
       }
 
       const emptyIndex = getFirstEmptyVisualSlotIndex(gameState.reels);
       if (emptyIndex === -1) {
-        gameState.buildStatus = { type: "warn", text: "空きスロットがありません。手動配置を有効にするか、スロットを空けてください" };
+        gameState.coins -= monster.cost;
+        gameState.pendingPlacement = createUnit(monster.id, 1);
+        gameState.pendingPurchaseSlotIndex = slotIndex;
+        gameState.buildStatus = { type: "warn", text: `リール満員: ${monster.name}の配置先を選ぶと既存モンスターを売却して置き換えます` };
         return;
       }
 
       gameState.coins -= monster.cost;
-      gameState.reels[emptyIndex] = monster.id;
+      gameState.reels[emptyIndex] = createUnit(monster.id, 1);
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
       gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, slotIndex);
       return;
@@ -321,9 +362,35 @@ function update(action, payload = {}) {
       if (gameState.pendingPlacement === null) return;
       const idx = payload.index;
       if (idx < 0 || idx >= gameState.reels.length) return;
-      gameState.reels[idx] = gameState.pendingPlacement;
+      const incomingUnit = toReelUnit(gameState.pendingPlacement);
+      if (!incomingUnit) return;
+      const existingUnit = toReelUnit(gameState.reels[idx]);
+      if (existingUnit && existingUnit.id === incomingUnit.id && existingUnit.star < CONFIG.MERGE.MAX_STAR) {
+        gameState.reels[idx] = createUnit(existingUnit.id, existingUnit.star + 1);
+        gameState.buildStatus = { type: "info", text: `${monsterById(existingUnit.id)?.name ?? existingUnit.id}が${formatStar(existingUnit.star + 1)}に強化されました` };
+      } else {
+        gameState.reels[idx] = incomingUnit;
+        if (existingUnit) {
+          const soldMonster = monsterById(existingUnit.id);
+          const sellValue = getSellValue(soldMonster);
+          gameState.coins += sellValue;
+          gameState.buildStatus = {
+            type: "info",
+            text: `${soldMonster?.name ?? "モンスター"}を売却（+${sellValue}）して配置しました`
+          };
+        } else {
+          gameState.buildStatus = { type: "info", text: "モンスターを配置しました" };
+        }
+      }
       gameState.pendingPlacement = null;
-      gameState.buildStatus = { type: "info", text: "モンスターを購入してリールに配置します" };
+      if (gameState.pendingPurchaseSlotIndex !== null) {
+        gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
+      }
+      gameState.pendingPurchaseSlotIndex = null;
+      gameState.selectedMonsterId = null;
+      gameState.selectedMonsterStar = 1;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
       return;
     }
     case "clearSlot": {
@@ -339,17 +406,47 @@ function update(action, payload = {}) {
       if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
       const idx = gameState.selectedSlotIndex;
       if (idx < 0 || idx >= gameState.reels.length) return;
-      const monsterId = gameState.reels[idx];
-      if (!monsterId) return;
-      const monster = monsterById(monsterId);
+      const unit = toReelUnit(gameState.reels[idx]);
+      if (!unit) return;
+      const monster = monsterById(unit.id);
       if (!monster) return;
       const sellValue = getSellValue(monster);
       gameState.coins += sellValue;
       gameState.reels[idx] = null;
       gameState.selectedMonsterId = null;
+      gameState.selectedMonsterStar = 1;
       gameState.selectedSource = null;
       gameState.selectedSlotIndex = null;
-      gameState.buildStatus = { type: "info", text: `${monster.name}を売却しました（+${sellValue}コイン）` };
+      gameState.buildStatus = { type: "info", text: `${monster.name}${formatStar(unit.star)}を売却しました（+${sellValue}コイン）` };
+      return;
+    }
+    case "moveSelectedReelMonster": {
+      if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) return;
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      const from = gameState.selectedSlotIndex;
+      const to = Number(payload.index);
+      if (to < 0 || to >= gameState.reels.length || from === to) return;
+      const fromUnit = toReelUnit(gameState.reels[from]);
+      if (!fromUnit) return;
+      const toUnit = toReelUnit(gameState.reels[to]);
+      if (!toUnit) {
+        gameState.reels[to] = fromUnit;
+        gameState.reels[from] = null;
+        gameState.buildStatus = { type: "info", text: "モンスターを移動しました" };
+      } else if (toUnit.id === fromUnit.id && toUnit.star < CONFIG.MERGE.MAX_STAR) {
+        gameState.reels[to] = createUnit(toUnit.id, toUnit.star + 1);
+        gameState.reels[from] = null;
+        gameState.buildStatus = { type: "info", text: `${monsterById(toUnit.id)?.name ?? toUnit.id}が${formatStar(toUnit.star + 1)}に強化されました` };
+      } else {
+        gameState.reels[to] = fromUnit;
+        gameState.reels[from] = toUnit;
+        gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
+      }
+      const selectedUnit = toReelUnit(gameState.reels[to]);
+      gameState.selectedSlotIndex = to;
+      gameState.selectedMonsterId = selectedUnit?.id ?? null;
+      gameState.selectedMonsterStar = selectedUnit?.star ?? 1;
       return;
     }
     case "startBattle": {
@@ -560,11 +657,12 @@ function getMonsterHabitats(monster) {
 
 function getVisibleGridCounts(visibleGrid) {
   return visibleGrid.reduce(
-    (acc, id) => {
-      if (!id) return acc;
-      const monster = monsterById(id);
+    (acc, slotValue) => {
+      const unit = toReelUnit(slotValue);
+      if (!unit) return acc;
+      const monster = monsterById(unit.id);
       if (!monster) return acc;
-      acc.idCounts[id] = (acc.idCounts[id] ?? 0) + 1;
+      acc.idCounts[unit.id] = (acc.idCounts[unit.id] ?? 0) + 1;
       acc.filledCount += 1;
       getMonsterHabitats(monster).forEach((habitat) => {
         acc.habitatCounts[habitat] = (acc.habitatCounts[habitat] ?? 0) + 1;
@@ -586,9 +684,12 @@ function findAlignedTripleCombos(visibleGrid) {
   ];
   return comboLines.reduce((acc, positions) => {
     const [a, b, c] = positions;
-    const idA = safeGrid[a];
-    if (!idA || idA !== safeGrid[b] || idA !== safeGrid[c]) return acc;
-    acc.push({ monsterId: idA, positions });
+    const unitA = toReelUnit(safeGrid[a]);
+    const unitB = toReelUnit(safeGrid[b]);
+    const unitC = toReelUnit(safeGrid[c]);
+    if (!unitA || !unitB || !unitC) return acc;
+    if (unitA.id !== unitB.id || unitA.id !== unitC.id) return acc;
+    acc.push({ monsterId: unitA.id, positions });
     return acc;
   }, []);
 }
@@ -607,19 +708,20 @@ function calcDamageBreakdown(grid, classSlots = []) {
   let baseDamage = 0;
   let classBonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
-  safeGrid.forEach((id) => {
-    if (!id) return;
-    const m = MONSTERS.find((x) => x.id === id);
+  safeGrid.forEach((slotValue) => {
+    const unit = toReelUnit(slotValue);
+    if (!unit) return;
+    const m = MONSTERS.find((x) => x.id === unit.id);
     if (!m) return;
-    baseDamage += m.atk;
-    if (Object.hasOwn(counts, id)) counts[id] += 1;
+    baseDamage += m.atk + (unit.star - 1) * CONFIG.MERGE.ATK_PER_EXTRA_STAR;
+    if (Object.hasOwn(counts, unit.id)) counts[unit.id] += 1;
   });
 
   classSlots.forEach((classId) => {
     if (classId === "slime_master" && counts.slime >= 3) classBonusDamage += 1;
     if (classId === "necromancer") classBonusDamage += counts.skeleton + counts.zombie;
     if (classId === "berserker") {
-      const summonedCount = safeGrid.filter((id) => id !== null).length;
+      const summonedCount = safeGrid.filter((slotValue) => toReelUnit(slotValue)).length;
       classBonusDamage += summonedCount;
     }
     if (classId === "lucky_strike" && (baseDamage + classBonusDamage) % 2 === 1) classBonusDamage += 2;
@@ -722,7 +824,7 @@ function getBuildStatusDisplay() {
     return { ...DEFAULT_BUILD_STATUS };
   }
   if (gameState.pendingPlacement) {
-    const monster = monsterById(gameState.pendingPlacement);
+    const monster = getUnitMonster(gameState.pendingPlacement);
     if (monster) {
       return {
         type: "info",
@@ -770,10 +872,11 @@ function renderBuildPhase() {
     .filter((entry) => entry.monster);
   const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
+  const selectedStar = gameState.selectedMonsterStar ?? 1;
   const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
   const sellValue = getSellValue(selected);
   const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
-  const pendingMonster = monsterById(gameState.pendingPlacement);
+  const pendingMonster = getUnitMonster(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
 
@@ -831,9 +934,9 @@ function renderBuildPhase() {
                 <div class="reel-col">
                   <strong>リール${colIdx + 1}</strong>
                   ${col
-                    .map((id, rowIdx) => {
+                    .map((slotValue, rowIdx) => {
                       const absoluteIndex = rowIdx * 3 + colIdx;
-                      const monster = monsterById(id);
+                      const monster = getUnitMonster(slotValue);
                       const isSelectedSlot =
                         gameState.selectedSource === "reel" && gameState.selectedSlotIndex === absoluteIndex;
                       return `<div class="slot" data-act="slot" data-index="${absoluteIndex}" ${
@@ -842,9 +945,9 @@ function renderBuildPhase() {
                         <div class="${isSelectedSlot ? "build-selected-slot" : ""}" style="width:100%;padding:2px;border-radius:8px;">
                           ${
                             monster
-                              ? `<div class="monster-chip ${monster.cls}">
+                              ? `<div class="monster-chip ${monster.cls} sp-${monster.species}">
                                   ${renderHabitatBand(monster, "habitat-band-chip")}
-                                  <span>${monster.name}</span>
+                                  <span>${monster.name}${formatStar(getUnitStar(slotValue))}</span>
                                 </div>`
                               : "空"
                           }
@@ -883,11 +986,12 @@ function renderBuildPhase() {
               pendingMonster
                 ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
                 : selected
-                  ? `<div class="monster-chip ${selected.cls}">
+                  ? `<div class="monster-chip ${selected.cls} sp-${selected.species}">
                       ${renderHabitatBand(selected, "habitat-band-chip")}
-                      <span>${selected.name}</span>
+                      <span>${selected.name}${formatStar(selectedStar)}</span>
                     </div>
                     ${renderHabitatBand(selected, "habitat-panel")}
+                    <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
@@ -958,9 +1062,11 @@ function bindBuildEvents() {
       const slotIndex = Number(slot.dataset.index);
       if (gameState.pendingPlacement !== null) {
         update("placePendingMonster", { index: slotIndex });
+      } else if (gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.selectedSlotIndex !== slotIndex) {
+        update("moveSelectedReelMonster", { index: slotIndex });
       } else if (gameState.reels[slotIndex]) {
         update("selectReelSlot", { index: slotIndex });
-      } else if (gameState.selectedSource === "reel") {
+      } else {
         update("clearSelection");
       }
       render();
@@ -1025,13 +1131,14 @@ function buildCompactTurnSummary({ playerActions = [], enemyAttack, outcome }) {
 
 function renderBattleGridCells() {
   return gameState.battle.visibleGrid
-    .map((id) => {
-      const m = monsterById(id);
+    .map((slotValue) => {
+      const unit = toReelUnit(slotValue);
+      const m = unit ? monsterById(unit.id) : null;
       return `<div class="slot battle-cell">${
         m
-          ? `<div class="monster-chip ${m.cls}">
+          ? `<div class="monster-chip ${m.cls} sp-${m.species}">
               ${renderHabitatBand(m, "habitat-band-chip")}
-              <span>${m.name}</span>
+              <span>${m.name}${formatStar(unit.star)}</span>
             </div>`
           : '<div class="muted">Empty</div>'
       }</div>`;
