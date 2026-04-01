@@ -288,6 +288,18 @@ function update(action, payload = {}) {
       gameState.monsterRerollCost += 1;
       return;
     }
+    case "rerollShop": {
+      if (gameState.phase !== "build") return;
+      if (gameState.coins < gameState.monsterRerollCost) {
+        gameState.buildStatus = { type: "warn", text: "リロールに必要なコインが不足しています" };
+        return;
+      }
+      gameState.coins -= gameState.monsterRerollCost;
+      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
+      gameState.monsterRerollCost += 1;
+      return;
+    }
     case "placePendingMonster": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement === null) return;
@@ -452,6 +464,17 @@ function update(action, payload = {}) {
     case "skipClassSelection": {
       if (gameState.phase !== "reward") return;
       enterBuildPhaseFromReward();
+      return;
+    }
+    case "rerollClassChoices": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.coins < gameState.classRerollCost) {
+        alert("リロールに必要なコインが不足しています。");
+        return;
+      }
+      gameState.coins -= gameState.classRerollCost;
+      gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+      gameState.classRerollCost += 1;
       return;
     }
     case "rerollClassChoices": {
@@ -805,6 +828,19 @@ function bindBuildEvents() {
   app.querySelectorAll("[data-act='toggle-freeze']").forEach((btn) => {
     btn.addEventListener("click", () => {
       update("toggleShopFreeze", { slotIndex: Number(btn.dataset.slotIndex) });
+      render();
+    });
+  });
+
+  app.querySelector("[data-act='reroll-shop']")?.addEventListener("click", () => {
+    update("rerollShop");
+    render();
+  });
+
+  app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target?.closest("[data-act='buy']")) return;
+      update("selectShopMonster", { monsterId: card.dataset.mid });
       render();
     });
   });
