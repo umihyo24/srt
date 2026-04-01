@@ -1011,21 +1011,13 @@ function renderBuildPhase() {
       <div class="build-layout">
         <div class="phase-root">
           <section class="panel">
-            <div class="shop-header-row">
-              <h3>ショップ</h3>
+            <div class="shop-action-row">
+              <label style="display:flex;gap:8px;align-items:center;">
+                <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
+                配置先を選ぶ
+              </label>
               <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
             </div>
-            <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-              <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
-              配置先を選ぶ（手動配置）
-            </label>
-            ${
-              showShopStatus
-                ? `<div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
-                    ${buildStatus.text}
-                  </div>`
-                : ""
-            }
             <div class="shop-grid">
               ${visibleShopEntries.map(
                 (entry) => `
@@ -1043,6 +1035,13 @@ function renderBuildPhase() {
                 </article>`
               ).join("")}
             </div>
+            ${
+              showShopStatus
+                ? `<div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
+                    ${buildStatus.text}
+                  </div>`
+                : ""
+            }
           </section>
 
           <section class="panel">
@@ -1105,10 +1104,10 @@ function renderBuildPhase() {
                 ? `<div class="monster-chip ${pendingMonster.cls} sp-${pendingMonster.species}">${pendingMonster.name} ${getMonsterStarLabel(gameState.pendingPlacement)}</div>
                    <p>このモンスターをスロットに配置してください。</p>`
                 : selected
-                  ? `<div class="monster-chip ${selected.cls} sp-${selected.species}">
+                  ? `${renderHabitatBand(selected, "habitat-panel")}
+                    <div class="monster-chip ${selected.cls} sp-${selected.species}">
                       <span>${selected.name}${formatStar(selectedStar)}</span>
                     </div>
-                    ${renderHabitatBand(selected, "habitat-panel")}
                     <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
