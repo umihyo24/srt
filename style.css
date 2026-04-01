@@ -91,17 +91,45 @@ button {
   font-size: 0.85rem;
 }
 
+.purchase-cost-btn {
+  padding: 9px 12px;
+  font-size: 0.9rem;
+  min-width: 78px;
+}
+
 /* Build phase */
 .build-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(680px, 2.4fr) minmax(300px, 1fr);
   gap: 14px;
+  align-items: start;
+}
+
+.build-header {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.build-main-stats {
+  margin-top: 8px;
 }
 
 .shop-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.shop-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.shop-header-row h3 {
+  margin: 0;
 }
 
 .build-status-bar {
@@ -132,6 +160,39 @@ button {
 
 .card {
   padding: 10px;
+  position: relative;
+}
+
+.shop-cost-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #f0b429;
+  color: #1f1500;
+  border: 1px solid #ffd976;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+}
+
+.habitat-panel {
+  height: 14px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.build-selected-shop {
+  border-color: #ffcf72;
+  box-shadow: inset 0 0 0 1px rgba(255, 207, 114, 0.45);
+}
+
+.shop-kept {
+  border-color: #7cd0ff;
+  box-shadow: inset 0 0 0 1px rgba(124, 208, 255, 0.35);
 }
 
 .card h4,
@@ -163,17 +224,43 @@ button {
   color: #9ac0ea;
 }
 
+.build-selected-slot {
+  outline: 2px solid #7bc1ff;
+  background: rgba(77, 139, 214, 0.2);
+}
+
 .monster-chip {
   width: 100%;
   border-radius: 7px;
   padding: 6px;
-  text-align: center;
   font-weight: 700;
+  display: grid;
+  gap: 6px;
+  text-align: center;
+}
+
+.habitat-band-chip {
+  height: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.52);
 }
 
 .m-slime { background: rgba(55, 193, 90, 0.2); border: 1px solid #43b865; }
 .m-skeleton { background: rgba(76, 122, 255, 0.22); border: 1px solid #5f7dff; }
 .m-zombie { background: rgba(153, 95, 255, 0.2); border: 1px solid #9e75ff; }
+.m-bat, .m-ghost { background: rgba(180, 214, 255, 0.18); border: 1px solid #7ca8da; }
+.m-wolf, .m-lizard { background: rgba(86, 168, 132, 0.2); border: 1px solid #4ea177; }
+.m-goblin, .m-mushroom { background: rgba(122, 189, 88, 0.2); border: 1px solid #78b157; }
+.m-imp { background: rgba(255, 120, 120, 0.2); border: 1px solid #d36d6d; }
+.m-knight { background: rgba(190, 190, 210, 0.2); border: 1px solid #9da3b6; }
+
+.monster-chip.sp-slime { background: rgba(72, 204, 116, 0.18); border: 1px solid #5fd07f; }
+.monster-chip.sp-undead { background: rgba(118, 106, 166, 0.24); border: 1px solid #9482d8; }
+.monster-chip.sp-beast { background: rgba(74, 152, 109, 0.24); border: 1px solid #63b986; }
+.monster-chip.sp-humanoid { background: rgba(88, 122, 173, 0.24); border: 1px solid #7eafe6; }
+.monster-chip.sp-demon { background: rgba(170, 82, 82, 0.24); border: 1px solid #d18282; }
+.monster-chip.sp-plant { background: rgba(98, 146, 70, 0.24); border: 1px solid #8bc35f; }
+.monster-chip.sp-reptile { background: rgba(90, 136, 118, 0.24); border: 1px solid #7fc5a9; }
 
 .panel {
   padding: 12px;
@@ -184,6 +271,11 @@ button {
   justify-content: space-between;
   align-items: center;
   margin-top: 8px;
+}
+
+.build-start-btn {
+  width: min(320px, 100%);
+  min-height: 44px;
 }
 
 /* Battle phase */
@@ -208,6 +300,11 @@ button {
 
 .battle-layout-3col {
   grid-template-columns: minmax(240px, 280px) minmax(420px, 1fr) minmax(240px, 300px);
+  align-items: stretch;
+}
+
+.battle-layout-2col {
+  grid-template-columns: minmax(480px, 1fr) minmax(240px, 300px);
   align-items: stretch;
 }
 
@@ -261,23 +358,6 @@ button {
   background: linear-gradient(180deg, #361923, #2b121a);
 }
 
-.battle-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(3, 8, 20, 0.72);
-  display: grid;
-  place-items: center;
-  z-index: 1000;
-  padding: 16px;
-}
-
-.battle-result-modal {
-  width: min(760px, 95vw);
-  max-height: 85vh;
-  overflow: auto;
-  border-color: #3d69a1;
-}
-
 .result-section {
   background: #0b1a32;
   border: 1px solid #2a4b75;
@@ -295,9 +375,87 @@ button {
   padding-left: 20px;
 }
 
-.battle-modal-actions {
+.battle-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 8, 20, 0.72);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.battle-result-modal {
+  width: min(840px, 95vw);
+  max-height: 85vh;
+  overflow: auto;
+  border-color: #3d69a1;
+}
+
+.battle-log-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.battle-log-modal-body {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.battle-log-turn {
+  border: 1px solid #2a4b75;
+  border-radius: 8px;
+  background: #0b1a32;
+  padding: 10px;
+}
+
+.battle-log-turn h4 {
+  margin: 0 0 8px;
+}
+
+.battle-log-group strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.battle-log-group ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.battle-log-outcome {
+  margin: 0;
+  color: #cde4ff;
+}
+
+.battle-compact-summary {
+  margin-top: 2px;
+  border-color: #3d6394;
+  background: linear-gradient(180deg, #112742, #0d1f35);
+}
+
+.battle-compact-summary ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.battle-turn-result-actions {
   display: flex;
   justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.battle-compact-victory {
+  border-color: #3f8a4b;
+  background: linear-gradient(180deg, #173521, #122e1c);
+}
+
+.battle-compact-defeat {
+  border-color: #9a4560;
+  background: linear-gradient(180deg, #3a1a25, #2d141d);
 }
 
 .log {
