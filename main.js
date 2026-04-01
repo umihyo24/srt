@@ -1,13 +1,23 @@
 const MONSTERS = [
   { id: "slime", name: "スライム", cost: 1, hp: 1, atk: 1, cls: "m-slime" },
   { id: "skeleton", name: "スケルトン", cost: 2, hp: 2, atk: 2, cls: "m-skeleton" },
-  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie" }
+  { id: "zombie", name: "ゾンビ", cost: 2, hp: 2, atk: 2, cls: "m-zombie" },
+  { id: "bat", name: "バット", cost: 1, hp: 1, atk: 1, cls: "m-bat" },
+  { id: "wolf", name: "ウルフ", cost: 2, hp: 2, atk: 3, cls: "m-wolf" },
+  { id: "goblin", name: "ゴブリン", cost: 1, hp: 2, atk: 1, cls: "m-goblin" },
+  { id: "imp", name: "インプ", cost: 2, hp: 1, atk: 3, cls: "m-imp" },
+  { id: "knight", name: "ナイト", cost: 3, hp: 3, atk: 3, cls: "m-knight" },
+  { id: "ghost", name: "ゴースト", cost: 2, hp: 1, atk: 2, cls: "m-ghost" },
+  { id: "mushroom", name: "マッシュルーム", cost: 1, hp: 2, atk: 1, cls: "m-mushroom" },
+  { id: "lizard", name: "リザード", cost: 2, hp: 2, atk: 2, cls: "m-lizard" }
 ];
 
 const CLASS_CHOICES = [
-  { id: "slime_master", name: "スライムマスター", desc: "スライムが揃うと追加ダメージ+1" },
-  { id: "necromancer", name: "ネクロマンサー", desc: "不死系(スケルトン/ゾンビ)の攻撃+1" },
-  { id: "beast_tamer", name: "ビーストテイマー", desc: "次ラウンド開始時コイン+2" }
+  { id: "slime_master", name: "スライムマスター", desc: "スライムが揃うと追加ダメージ+1", stackable: true },
+  { id: "necromancer", name: "ネクロマンサー", desc: "不死系(スケルトン/ゾンビ)の攻撃+1", stackable: true },
+  { id: "beast_tamer", name: "ビーストテイマー", desc: "次ラウンド開始時コイン+2", stackable: false, category: "economic" },
+  { id: "berserker", name: "バーサーカー", desc: "出撃モンスター1体につき追加ダメージ+1", stackable: true },
+  { id: "lucky_strike", name: "ラッキーストライク", desc: "合計ダメージが奇数なら追加ダメージ+2", stackable: true }
 ];
 
 const INITIAL_STATE = () => ({
@@ -17,9 +27,17 @@ const INITIAL_STATE = () => ({
   hp: 12,
   buildManualPlacement: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
+  shopChoices: rollShopChoices(MONSTERS, 3),
+  monsterRerollCost: 4,
   selectedMonsterId: null,
+  selectedSource: null, // shop | reel | null
+  selectedSlotIndex: null,
   pendingPlacement: null,
-  classBonus: null,
+  classSlots: [],
+  maxClassSlots: 3,
+  maxDuplicatePerClass: 2,
+  classChoices: rollClassChoices(CLASS_CHOICES, 3),
+  classRerollCost: 4,
   reels: Array(18).fill(null),
   enemy: { name: "ゴブリンウォーリア", hp: 10, atk: 2 },
   battle: {
@@ -30,11 +48,13 @@ const INITIAL_STATE = () => ({
     gridRows: 3,
     lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
     log: [],
-    subPhase: "idle", // idle | spinning | player_result | enemy_result | victory | defeat
-    showResultModal: false,
+    logEntries: [],
+    compactTurnSummary: ["スピンして戦闘を開始してください。"],
+    showBattleLogModal: false,
+    subPhase: "idle", // idle | spinning | enemy_result | victory | defeat
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
-    awaitingContinue: false,
+    requiresOutcomeConfirm: false,
     resolved: false,
     won: null
   }
@@ -42,6 +62,73 @@ const INITIAL_STATE = () => ({
 
 const gameState = INITIAL_STATE();
 const app = document.getElementById("app");
+const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスターを購入してリールに配置します" });
+const SHOP_SIZE = 3;
+const REROLL_INITIAL_COST = 4;
+const CHOICE_COUNT = 3;
+
+function resetBuildUiState() {
+  gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
+}
+
+function getSellValue(monster) {
+  if (!monster) return 0;
+  return Math.floor(monster.cost / 2);
+}
+
+function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
+  const candidates = [...pool];
+  for (let i = candidates.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((monster) => monster.id);
+}
+
+function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
+  const candidates = [...pool];
+  for (let i = candidates.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  return candidates.slice(0, Math.min(choiceCount, candidates.length)).map((classData) => classData.id);
+}
+
+function countOwnedClass(classId) {
+  return gameState.classSlots.filter((ownedId) => ownedId === classId).length;
+}
+
+function canPickClass(classId) {
+  const classData = CLASS_CHOICES.find((c) => c.id === classId);
+  if (!classData) return { ok: false, message: "不正な職業です。" };
+  if (gameState.classSlots.length >= gameState.maxClassSlots) {
+    return { ok: false, message: "職業スロットが上限です。" };
+  }
+  const duplicateCount = countOwnedClass(classId);
+  if (classData.stackable === false && duplicateCount > 0) {
+    return { ok: false, message: "この経済系職業は重複できません。" };
+  }
+  if (duplicateCount >= gameState.maxDuplicatePerClass) {
+    return { ok: false, message: "同じ職業はこれ以上選べません。" };
+  }
+  return { ok: true, message: "" };
+}
+
+function enterBuildPhaseFromReward() {
+  const beastTamerCount = countOwnedClass("beast_tamer");
+  if (beastTamerCount > 0) {
+    gameState.coins += beastTamerCount * 2;
+  }
+  gameState.phase = "build";
+  resetBuildUiState();
+  gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+  gameState.monsterRerollCost = REROLL_INITIAL_COST;
+  gameState.enemy = {
+    name: `ラウンド${gameState.round}の敵`,
+    hp: 10 + gameState.round * 2,
+    atk: 2 + Math.floor(gameState.round / 2)
+  };
+}
 
 function update(action, payload = {}) {
   switch (action) {
@@ -60,15 +147,51 @@ function update(action, payload = {}) {
       }
       return;
     }
+    case "selectShopMonster": {
+      if (gameState.phase !== "build") return;
+      const monster = MONSTERS.find((m) => m.id === payload.monsterId);
+      if (!monster) return;
+      gameState.selectedMonsterId = monster.id;
+      gameState.selectedSource = "shop";
+      gameState.selectedSlotIndex = null;
+      return;
+    }
+    case "selectReelSlot": {
+      if (gameState.phase !== "build") return;
+      const idx = payload.index;
+      if (idx < 0 || idx >= gameState.reels.length) return;
+      const id = gameState.reels[idx];
+      if (!id) return;
+      gameState.selectedMonsterId = id;
+      gameState.selectedSource = "reel";
+      gameState.selectedSlotIndex = idx;
+      return;
+    }
+    case "clearSelection": {
+      if (gameState.phase !== "build") return;
+      gameState.selectedMonsterId = null;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
+      return;
+    }
     case "buyMonster": {
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster || gameState.phase !== "build") return;
+      if (!gameState.shopChoices.includes(monster.id)) return;
+      gameState.selectedMonsterId = monster.id;
+      gameState.selectedSource = "shop";
+      gameState.selectedSlotIndex = null;
       if (gameState.pendingPlacement !== null) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
       }
       if (gameState.coins < monster.cost) {
-        gameState.buildStatus = { type: "warn", text: "コインが不足しています" };
+        gameState.buildStatus = {
+          type: "warn",
+          text: "コインが不足しています",
+          code: "insufficient_coins",
+          requiredCoins: monster.cost
+        };
         return;
       }
       gameState.selectedMonsterId = monster.id;
@@ -90,6 +213,18 @@ function update(action, payload = {}) {
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
       return;
     }
+    case "rerollShop": {
+      if (gameState.phase !== "build") return;
+      if (gameState.coins < gameState.monsterRerollCost) {
+        gameState.buildStatus = { type: "warn", text: "リロールに必要なコインが不足しています" };
+        return;
+      }
+      gameState.coins -= gameState.monsterRerollCost;
+      gameState.shopChoices = rollShopChoices(MONSTERS, CHOICE_COUNT);
+      gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
+      gameState.monsterRerollCost += 1;
+      return;
+    }
     case "placePendingMonster": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement === null) return;
@@ -107,6 +242,25 @@ function update(action, payload = {}) {
       gameState.reels[idx] = null;
       return;
     }
+    case "sellSelectedMonster": {
+      if (gameState.phase !== "build") return;
+      if (gameState.pendingPlacement !== null) return;
+      if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
+      const idx = gameState.selectedSlotIndex;
+      if (idx < 0 || idx >= gameState.reels.length) return;
+      const monsterId = gameState.reels[idx];
+      if (!monsterId) return;
+      const monster = monsterById(monsterId);
+      if (!monster) return;
+      const sellValue = getSellValue(monster);
+      gameState.coins += sellValue;
+      gameState.reels[idx] = null;
+      gameState.selectedMonsterId = null;
+      gameState.selectedSource = null;
+      gameState.selectedSlotIndex = null;
+      gameState.buildStatus = { type: "info", text: `${monster.name}を売却しました（+${sellValue}コイン）` };
+      return;
+    }
     case "startBattle": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement !== null) {
@@ -122,11 +276,13 @@ function update(action, payload = {}) {
         gridRows: 3,
         lastDamage: { baseDamage: 0, bonusDamage: 0, totalDamage: 0 },
         log: ["バトル開始！スロットを回して攻撃します。"],
+        logEntries: [],
+        compactTurnSummary: ["スピンして戦闘を開始してください。"],
+        showBattleLogModal: false,
         subPhase: "idle",
-        showResultModal: false,
         turnResult: null,
         pendingOutcome: null,
-        awaitingContinue: false,
+        requiresOutcomeConfirm: false,
         resolved: false,
         won: null
       };
@@ -138,7 +294,7 @@ function update(action, payload = {}) {
       gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
       gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
-      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classBonus);
+      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classSlots);
       const dmg = damageBreakdown.totalDamage;
       gameState.battle.lastDamage = damageBreakdown;
       gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
@@ -161,23 +317,49 @@ function update(action, payload = {}) {
         totalDamage: dmg,
         outcome
       };
-      gameState.battle.showResultModal = true;
+      gameState.battle.logEntries.push({
+        turn: gameState.battle.turn,
+        playerActions,
+        enemyActions: enemyActions.length > 0 ? enemyActions : ["敵は力をためている"],
+        outcomeText: getBattleOutcomeText(outcome)
+      });
+      gameState.battle.compactTurnSummary = buildCompactTurnSummary({
+        totalDamage: dmg,
+        enemyAttack: enemyActions[0] || "敵は力をためている",
+        outcome
+      });
       gameState.battle.pendingOutcome = outcome;
-      gameState.battle.awaitingContinue = true;
+      gameState.battle.requiresOutcomeConfirm = outcome === "victory" || outcome === "defeat";
       gameState.battle.subPhase = outcome === "victory" ? "victory" : outcome === "defeat" ? "defeat" : "enemy_result";
       gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計${dmg}ダメージ`);
       if (outcome === "victory") gameState.battle.log.push("敵を倒した。");
       if (outcome === "defeat") gameState.battle.log.push("プレイヤーは倒れた。");
+      if (outcome === "continue") {
+        gameState.battle.subPhase = "idle";
+        gameState.battle.pendingOutcome = null;
+      }
+      return;
+    }
+    case "openBattleLog": {
+      if (gameState.phase !== "battle") return;
+      gameState.battle.showBattleLogModal = true;
+      return;
+    }
+    case "closeBattleLog": {
+      if (gameState.phase !== "battle") return;
+      gameState.battle.showBattleLogModal = false;
       return;
     }
     case "battleNext": {
       if (gameState.phase !== "battle") return;
-      if (!gameState.battle.awaitingContinue || !gameState.battle.showResultModal) return;
+      if (!gameState.battle.requiresOutcomeConfirm) return;
       if (gameState.battle.pendingOutcome === "victory") {
         gameState.battle.resolved = true;
         gameState.battle.won = true;
         gameState.phase = "reward";
         gameState.coins += 8;
+        gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+        gameState.classRerollCost = REROLL_INITIAL_COST;
         gameState.round += 1;
         return;
       }
@@ -188,25 +370,36 @@ function update(action, payload = {}) {
         gameState.phase = "gameover";
         return;
       }
-
-      gameState.battle.showResultModal = false;
-      gameState.battle.turnResult = null;
-      gameState.battle.pendingOutcome = null;
-      gameState.battle.awaitingContinue = false;
-      gameState.battle.subPhase = "idle";
       return;
     }
     case "pickClass": {
       if (gameState.phase !== "reward") return;
       const picked = CLASS_CHOICES.find((c) => c.id === payload.classId);
       if (!picked) return;
-      gameState.classBonus = picked.id;
-      gameState.phase = "build";
-      gameState.enemy = {
-        name: `ラウンド${gameState.round}の敵`,
-        hp: 10 + gameState.round * 2,
-        atk: 2 + Math.floor(gameState.round / 2)
-      };
+      if (!gameState.classChoices.includes(picked.id)) return;
+      const classCheck = canPickClass(picked.id);
+      if (!classCheck.ok) {
+        alert(classCheck.message);
+        return;
+      }
+      gameState.classSlots.push(picked.id);
+      enterBuildPhaseFromReward();
+      return;
+    }
+    case "skipClassSelection": {
+      if (gameState.phase !== "reward") return;
+      enterBuildPhaseFromReward();
+      return;
+    }
+    case "rerollClassChoices": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.coins < gameState.classRerollCost) {
+        alert("リロールに必要なコインが不足しています。");
+        return;
+      }
+      gameState.coins -= gameState.classRerollCost;
+      gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+      gameState.classRerollCost += 1;
       return;
     }
     case "restart": {
@@ -229,18 +422,18 @@ function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
   });
 }
 
-function getVisualSlotIndices() {
-  const indices = [];
-  for (let col = 0; col < 3; col += 1) {
-    for (let row = 0; row < 6; row += 1) {
-      indices.push(row * 3 + col);
+function getVisualOrderIndices(cols, rows) {
+  const result = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      result.push(row * cols + col);
     }
   }
-  return indices;
+  return result;
 }
 
 function getFirstEmptyVisualSlotIndex(reels) {
-  const visualOrder = getVisualSlotIndices();
+  const visualOrder = getVisualOrderIndices(3, 6);
   return visualOrder.find((idx) => reels[idx] === null) ?? -1;
 }
 
@@ -260,7 +453,7 @@ function spinVisibleGrid(reels) {
   return grid;
 }
 
-function calcDamageBreakdown(grid, classBonus) {
+function calcDamageBreakdown(grid, classSlots = []) {
   let baseDamage = 0;
   let bonusDamage = 0;
   const counts = { slime: 0, skeleton: 0, zombie: 0 };
@@ -272,8 +465,15 @@ function calcDamageBreakdown(grid, classBonus) {
     counts[id] += 1;
   });
 
-  if (classBonus === "slime_master" && counts.slime >= 3) bonusDamage += 1;
-  if (classBonus === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+  classSlots.forEach((classId) => {
+    if (classId === "slime_master" && counts.slime >= 3) bonusDamage += 1;
+    if (classId === "necromancer") bonusDamage += counts.skeleton + counts.zombie;
+    if (classId === "berserker") {
+      const summonedCount = grid.filter((id) => id !== null).length;
+      bonusDamage += summonedCount;
+    }
+    if (classId === "lucky_strike" && (baseDamage + bonusDamage) % 2 === 1) bonusDamage += 2;
+  });
 
   return {
     baseDamage,
@@ -324,6 +524,10 @@ function render() {
 }
 
 function getBuildStatusDisplay() {
+  const status = gameState.buildStatus || DEFAULT_BUILD_STATUS;
+  if (status.code === "insufficient_coins" && gameState.coins >= (status.requiredCoins ?? Infinity)) {
+    return { ...DEFAULT_BUILD_STATUS };
+  }
   if (gameState.pendingPlacement) {
     const monster = monsterById(gameState.pendingPlacement);
     if (monster) {
@@ -333,23 +537,63 @@ function getBuildStatusDisplay() {
       };
     }
   }
-  return gameState.buildStatus || { type: "info", text: "モンスターを購入してリールに配置します" };
+  return status;
+}
+
+function getGroupedClassEntries(classSlots = []) {
+  return classSlots.reduce((acc, classId) => {
+    const picked = CLASS_CHOICES.find((c) => c.id === classId);
+    if (!picked) return acc;
+    const found = acc.find((item) => item.id === classId);
+    if (found) {
+      found.count += 1;
+      return acc;
+    }
+    acc.push({ id: classId, name: picked.name, desc: picked.desc, count: 1 });
+    return acc;
+  }, []);
+}
+
+function getCurrentClassInfo(classSlots = []) {
+  const grouped = getGroupedClassEntries(classSlots);
+  if (grouped.length === 0) {
+    return {
+      title: "現在の職業: なし",
+      entries: []
+    };
+  }
+  return {
+    title: "現在の職業",
+    entries: grouped.map((item) => ({
+      label: `${item.name}${item.count > 1 ? ` x${item.count}` : ""}`,
+      desc: item.desc
+    }))
+  };
 }
 
 function renderBuildPhase() {
+  const visibleShopMonsters = gameState.shopChoices
+    .map((id) => monsterById(id))
+    .filter(Boolean);
+  const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
+  const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
+  const sellValue = getSellValue(selected);
+  const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
   const pendingMonster = monsterById(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
   const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
 
   app.innerHTML = `
     <div class="phase-root">
-      <div class="topbar">
-        <h2>ビルドフェーズ（ショップ＆リール編集）</h2>
-        <div class="badges">
-          <div class="badge">ラウンド ${gameState.round}</div>
-          <div class="badge">コイン ${gameState.coins}</div>
-          <div class="badge">HP ${gameState.hp}</div>
+      <div class="topbar build-header">
+        <div class="build-header-main">
+          <h2>ビルドフェーズ（ショップ＆リール編集）</h2>
+          <div class="badges build-main-stats">
+            <div class="badge">ラウンド ${gameState.round}</div>
+            <div class="badge">コイン ${gameState.coins}</div>
+            <div class="badge">HP ${gameState.hp}</div>
+          </div>
         </div>
       </div>
 
@@ -361,13 +605,18 @@ function renderBuildPhase() {
               <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
               配置先を選ぶ（手動配置）
             </label>
+            <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+              <button class="small btn-secondary" data-act="reroll-shop">リロール (${gameState.monsterRerollCost}コイン)</button>
+            </div>
             <div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
               ${buildStatus.text}
             </div>
             <div class="shop-grid">
-              ${MONSTERS.map(
+              ${visibleShopMonsters.map(
                 (m) => `
-                <article class="card ${m.cls}">
+                <article class="card ${m.cls} ${
+                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === m.id ? "build-selected-shop" : ""
+                }" data-act="select-shop" data-mid="${m.id}">
                   <h4>${m.name}</h4>
                   <div class="stats">コスト ${m.cost} / HP ${m.hp} / ダメージ ${m.atk}</div>
                   <button class="small btn-primary" data-act="buy" data-mid="${m.id}" ${pendingMonster ? "disabled" : ""}>購入</button>
@@ -388,10 +637,14 @@ function renderBuildPhase() {
                     .map((id, rowIdx) => {
                       const absoluteIndex = rowIdx * 3 + colIdx;
                       const monster = monsterById(id);
+                      const isSelectedSlot =
+                        gameState.selectedSource === "reel" && gameState.selectedSlotIndex === absoluteIndex;
                       return `<div class="slot" data-act="slot" data-index="${absoluteIndex}" ${
                         pendingMonster ? 'style="outline:2px solid #ffcc7a;cursor:pointer;"' : ""
                       }>
-                        ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
+                        <div class="${isSelectedSlot ? "build-selected-slot" : ""}" style="width:100%;padding:2px;border-radius:8px;">
+                          ${monster ? `<div class="monster-chip ${monster.cls}">${monster.name}</div>` : "空"}
+                        </div>
                       </div>`;
                     })
                     .join("")}
@@ -400,29 +653,52 @@ function renderBuildPhase() {
                 .join("")}
             </div>
           </section>
+
         </div>
 
         <aside class="phase-root">
+          <section class="panel">
+            <h3>次のバトル情報</h3>
+            <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
+            <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
+            <button class="btn-primary build-start-btn" style="width:100%;margin-top:10px;" data-act="start" ${
+              pendingMonster ? "disabled" : ""
+            }>勝ちに行く</button>
+            ${
+              pendingMonster
+                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
+                : ""
+            }
+          </section>
+
           <section class="panel">
             <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
             ${
               pendingMonster
                 ? `<div class="monster-chip ${pendingMonster.cls}">${pendingMonster.name}</div><p>このモンスターをスロットに配置してください。</p>`
                 : selected
-                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div><p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>`
+                  ? `<div class="monster-chip ${selected.cls}">${selected.name}</div>
+                    <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
+                    <p>選択元: ${gameState.selectedSource === "shop" ? "ショップ" : "配置済みスロット"}</p>
+                    ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
+                    ${
+                      canSell
+                        ? '<button class="small btn-danger" data-act="sell-selected">売却</button>'
+                        : ""
+                    }`
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
 
           <section class="panel">
-            <h3>次のバトル情報</h3>
-            <div class="next-info"><span>敵: ${gameState.enemy.name}</span><span>HP ${gameState.enemy.hp}</span></div>
-            <div class="next-info"><span>敵攻撃</span><span>${gameState.enemy.atk}</span></div>
-            <button class="btn-primary" style="width:100%;margin-top:10px;" data-act="start" ${pendingMonster ? "disabled" : ""}>Start Battle</button>
+            <h3>現在の職業</h3>
+            <p><strong>${classInfo.title}</strong></p>
             ${
-              pendingMonster
-                ? '<p style="margin-top:8px;color:#ffcc7a;">配置待ちモンスターの配置後にバトル開始できます。</p>'
-                : ""
+              classInfo.entries.length === 0
+                ? '<p class="muted">職業を獲得するとここに効果が表示されます。</p>'
+                : `<ul>${classInfo.entries
+                    .map((entry) => `<li><strong>${entry.label}</strong><br /><span class="muted">${entry.desc}</span></li>`)
+                    .join("")}</ul>`
             }
           </section>
         </aside>
@@ -447,16 +723,36 @@ function bindBuildEvents() {
     });
   });
 
+  app.querySelector("[data-act='reroll-shop']")?.addEventListener("click", () => {
+    update("rerollShop");
+    render();
+  });
+
+  app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target?.closest("[data-act='buy']")) return;
+      update("selectShopMonster", { monsterId: card.dataset.mid });
+      render();
+    });
+  });
+
   app.querySelectorAll("[data-act='slot']").forEach((slot) => {
     slot.addEventListener("click", () => {
       const slotIndex = Number(slot.dataset.index);
       if (gameState.pendingPlacement !== null) {
         update("placePendingMonster", { index: slotIndex });
-      } else {
-        update("clearSlot", { index: slotIndex });
+      } else if (gameState.reels[slotIndex]) {
+        update("selectReelSlot", { index: slotIndex });
+      } else if (gameState.selectedSource === "reel") {
+        update("clearSelection");
       }
       render();
     });
+  });
+
+  app.querySelector("[data-act='sell-selected']")?.addEventListener("click", () => {
+    update("sellSelectedMonster");
+    render();
   });
 
   const startBtn = app.querySelector("[data-act='start']");
@@ -466,11 +762,11 @@ function bindBuildEvents() {
   });
 }
 
-function getClassBonusLabel(classBonus) {
-  if (classBonus === "slime_master") return "スライムマスター（スライム3体以上で+1）";
-  if (classBonus === "necromancer") return "ネクロマンサー（不死系攻撃+1/体）";
-  if (classBonus === "beast_tamer") return "ビーストテイマー（次ラウンド開始時コイン+2）";
-  return "なし";
+function getClassBonusLabel(classSlots = []) {
+  if (classSlots.length === 0) return "なし";
+  return getGroupedClassEntries(classSlots)
+    .map((entry) => `${entry.name}${entry.count > 1 ? ` x${entry.count}` : ""}`)
+    .join(" / ");
 }
 
 function getEnemyAttackInfo(battleTurn) {
@@ -481,8 +777,7 @@ function getEnemyAttackInfo(battleTurn) {
 }
 
 function getBattleContinueLabel(subPhase) {
-  if (subPhase === "victory") return "報酬へ進む";
-  if (subPhase === "defeat") return "結果へ";
+  if (subPhase === "victory" || subPhase === "defeat") return "次へ";
   return "次へ";
 }
 
@@ -495,6 +790,22 @@ function getBattleStatusText(subPhase) {
   return "";
 }
 
+function buildCompactTurnSummary({ totalDamage, enemyAttack, outcome }) {
+  const lines = ["味方の攻撃！", `合計${totalDamage}ダメージ`];
+  if (outcome === "victory") {
+    lines.push("戦闘に勝利した！");
+    return lines;
+  }
+  if (outcome === "defeat") {
+    lines.push(enemyAttack);
+    lines.push("プレイヤーは倒れた。");
+    return lines;
+  }
+  lines.push(enemyAttack);
+  lines.push("戦闘続行");
+  return lines;
+}
+
 function renderBattleGridCells() {
   return gameState.battle.visibleGrid
     .map((id) => {
@@ -504,14 +815,64 @@ function renderBattleGridCells() {
     .join("");
 }
 
-function renderBattleLogPanel() {
+function renderCompactBattleSummary() {
+  const summaryLines = gameState.battle.compactTurnSummary || [];
+  const isVictory = gameState.battle.pendingOutcome === "victory";
+  const isDefeat = gameState.battle.pendingOutcome === "defeat";
+  const summaryClass = isVictory ? "battle-compact-victory" : isDefeat ? "battle-compact-defeat" : "";
+
   return `
-    <section class="panel battle-panel">
-      <h3>バトルログ</h3>
-      <div class="log">
-        ${gameState.battle.log.map((l) => `<div class="log-entry">${l}</div>`).join("")}
-      </div>
+    <section class="panel battle-compact-summary ${summaryClass}">
+      <h3>バトル結果</h3>
+      <ul>
+        ${summaryLines.map((line) => `<li>${line}</li>`).join("")}
+      </ul>
+      ${
+        gameState.battle.requiresOutcomeConfirm
+          ? '<div class="battle-turn-result-actions"><button class="btn-secondary battle-next-btn" data-act="battle-next">次へ</button></div>'
+          : ""
+      }
     </section>
+  `;
+}
+
+function renderBattleLogModal() {
+  if (!gameState.battle.showBattleLogModal) return "";
+  const entries = gameState.battle.logEntries;
+  const entryHtml =
+    entries.length === 0
+      ? '<p class="muted">まだバトルログはありません。</p>'
+      : entries
+          .map(
+            (entry) => `
+          <article class="battle-log-turn">
+            <h4>ターン${entry.turn}</h4>
+            <div class="battle-log-group">
+              <strong>・プレイヤー</strong>
+              <ul>${entry.playerActions.map((line) => `<li>${line}</li>`).join("")}</ul>
+            </div>
+            <div class="battle-log-group">
+              <strong>・エネミー</strong>
+              <ul>${entry.enemyActions.map((line) => `<li>${line}</li>`).join("")}</ul>
+            </div>
+            <p class="battle-log-outcome">${entry.outcomeText}</p>
+          </article>
+        `
+          )
+          .join("");
+
+  return `
+    <div class="battle-modal-overlay">
+      <section class="panel battle-result-modal">
+        <div class="battle-log-modal-header">
+          <h3>バトルログ</h3>
+          <button class="small btn-secondary" data-act="close-battle-log">閉じる</button>
+        </div>
+        <div class="battle-log-modal-body">
+          ${entryHtml}
+        </div>
+      </section>
+    </div>
   `;
 }
 
@@ -528,7 +889,9 @@ function renderBattleCenterPanel() {
       </div>
       <div class="battle-action-row">
         <button class="btn-primary battle-spin-btn" data-act="spin" ${canSpin ? "" : "disabled"}>スピンして攻撃</button>
+        <button class="btn-secondary battle-next-btn" data-act="open-battle-log">バトルログ</button>
       </div>
+      ${renderCompactBattleSummary()}
     </section>
   `;
 }
@@ -549,71 +912,14 @@ function renderEnemyInfoPanel() {
   `;
 }
 
-function renderBattleSummaryPanel() {
-  const { baseDamage, bonusDamage, totalDamage } = gameState.battle.lastDamage;
-  return `
-    <section class="panel battle-summary-panel">
-      <h3>ダメージサマリー（前回スピン）</h3>
-      <div class="battle-summary-grid">
-        <div class="summary-card">
-          <div class="muted">基礎ダメージ</div>
-          <strong>${baseDamage}</strong>
-        </div>
-        <div class="summary-card">
-          <div class="muted">クラスボーナス</div>
-          <strong>${bonusDamage}</strong>
-        </div>
-        <div class="summary-card summary-total">
-          <div class="muted">合計ダメージ</div>
-          <strong>${totalDamage}</strong>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-function renderBattleResultModal() {
-  if (!gameState.battle.showResultModal || !gameState.battle.turnResult) return "";
-  const { playerActions, enemyActions, outcome, totalDamage } = gameState.battle.turnResult;
-  const outcomeText =
-    outcome === "victory" ? "敵を倒した" : outcome === "defeat" ? "プレイヤーは倒れた" : "戦闘続行";
-  const continueLabel = getBattleContinueLabel(gameState.battle.subPhase);
-
-  return `
-    <div class="battle-modal-overlay">
-      <section class="panel battle-result-modal">
-        <h3>ターン${gameState.battle.turn} の結果</h3>
-        <div class="result-section">
-          <h4>プレイヤーの攻撃</h4>
-          <ul>
-            ${playerActions.map((line) => `<li>${line}</li>`).join("")}
-            <li>このターンの合計ダメージ ${totalDamage}</li>
-          </ul>
-        </div>
-        <div class="result-section">
-          <h4>敵の行動</h4>
-          <ul>
-            ${
-              enemyActions.length > 0
-                ? enemyActions.map((line) => `<li>${line}</li>`).join("")
-                : "<li>敵は行動できない。</li>"
-            }
-          </ul>
-        </div>
-        <div class="result-section">
-          <h4>結果</h4>
-          <ul><li>${outcomeText}</li></ul>
-        </div>
-        <div class="battle-modal-actions">
-          <button class="btn-secondary battle-next-btn" data-act="battle-next">${continueLabel}</button>
-        </div>
-      </section>
-    </div>
-  `;
+function getBattleOutcomeText(outcome) {
+  if (outcome === "victory") return "敵を倒した";
+  if (outcome === "defeat") return "プレイヤーは倒れた";
+  return "戦闘続行";
 }
 
 function renderBattlePhase() {
-  const classBonusLabel = getClassBonusLabel(gameState.classBonus);
+  const classBonusLabel = getClassBonusLabel(gameState.classSlots);
   app.innerHTML = `
     <div class="phase-root battle-screen">
       <div class="topbar">
@@ -626,10 +932,7 @@ function renderBattlePhase() {
         </div>
       </div>
 
-      <div class="battle-layout battle-layout-3col">
-        <aside class="battle-col battle-col-left">
-          ${renderBattleLogPanel()}
-        </aside>
+      <div class="battle-layout battle-layout-2col">
         <main class="battle-col battle-col-center">
           ${renderBattleCenterPanel()}
         </main>
@@ -638,8 +941,7 @@ function renderBattlePhase() {
         </aside>
       </div>
 
-      ${renderBattleSummaryPanel()}
-      ${renderBattleResultModal()}
+      ${renderBattleLogModal()}
     </div>
   `;
 
@@ -651,20 +953,43 @@ function renderBattlePhase() {
     update("battleNext");
     render();
   });
+  app.querySelector("[data-act='open-battle-log']")?.addEventListener("click", () => {
+    update("openBattleLog");
+    render();
+  });
+  app.querySelector("[data-act='close-battle-log']")?.addEventListener("click", () => {
+    update("closeBattleLog");
+    render();
+  });
 }
 
 function renderRewardPhase() {
+  const visibleClassChoices = gameState.classChoices
+    .map((id) => CLASS_CHOICES.find((c) => c.id === id))
+    .filter(Boolean);
+  const classSlotFull = gameState.classSlots.length >= gameState.maxClassSlots;
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
         <h2>リワードフェーズ（クラス選択）</h2>
-        <div class="badge">ラウンド ${gameState.round}</div>
+        <div class="badges">
+          <div class="badge">ラウンド ${gameState.round}</div>
+          <div class="badge">コイン ${gameState.coins}</div>
+        </div>
       </div>
 
       <section class="panel">
-        <h3>クラスを1つ選択してください</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <h3>クラスを1つ選択してください</h3>
+          <button class="small btn-secondary" data-act="reroll-class">リロール (${gameState.classRerollCost}コイン)</button>
+        </div>
+        ${
+          classSlotFull
+            ? '<p class="muted">職業スロットが上限です。「スキップ」で次のビルドへ進んでください。</p>'
+            : ""
+        }
         <div class="choices">
-          ${CLASS_CHOICES.map(
+          ${visibleClassChoices.map(
             (c) => `
             <article class="choice">
               <h4>${c.name}</h4>
@@ -672,6 +997,9 @@ function renderRewardPhase() {
               <button class="btn-secondary" data-act="pick" data-cid="${c.id}">このクラスを選ぶ</button>
             </article>`
           ).join("")}
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+          <button class="btn-secondary" data-act="skip-class">スキップ</button>
         </div>
       </section>
     </div>
@@ -682,6 +1010,14 @@ function renderRewardPhase() {
       update("pickClass", { classId: btn.dataset.cid });
       render();
     });
+  });
+  app.querySelector("[data-act='reroll-class']")?.addEventListener("click", () => {
+    update("rerollClassChoices");
+    render();
+  });
+  app.querySelector("[data-act='skip-class']")?.addEventListener("click", () => {
+    update("skipClassSelection");
+    render();
   });
 }
 
