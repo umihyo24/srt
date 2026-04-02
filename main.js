@@ -1176,6 +1176,20 @@ function renderBuildPhase() {
           </section>
 
           ${
+            gameState.reelInteractionConfirm
+              ? `<section class="panel">
+                  <h3>移動方法を選択</h3>
+                  <p>同一モンスター/同一レベルです。</p>
+                  <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
+                    <button class="small btn-secondary" data-act="confirm-reel-swap">入替</button>
+                    <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
+                  </div>
+                </section>`
+              : ""
+          }
+
+          ${
             gameState.replacementConfirm
               ? `<section class="panel">
                   <h3>置き換え確認</h3>
