@@ -92,9 +92,16 @@ button {
 }
 
 .purchase-cost-btn {
-  padding: 9px 12px;
-  font-size: 0.9rem;
+  padding: 10px 14px;
+  font-size: 0.95rem;
   min-width: 78px;
+}
+
+.card-controls {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Build phase */
@@ -129,6 +136,45 @@ button {
   margin-bottom: 8px;
 }
 
+.action-left,
+.action-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-right button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.selected-info-panel {
+  min-height: 220px;
+}
+
+.selected-info-content {
+  min-height: 170px;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 8px;
+  align-content: start;
+}
+
+.selected-info-stats {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selected-info-placeholder {
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px dashed #335a86;
+  border-radius: 8px;
+}
+
 .build-status-bar {
   min-height: 40px;
   max-height: 40px;
@@ -145,6 +191,20 @@ button {
   text-overflow: ellipsis;
 }
 
+.build-status-interaction {
+  max-height: none;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: normal;
+}
+
+.build-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .build-status-info {
   color: #cde4ff;
 }
@@ -158,21 +218,6 @@ button {
 .card {
   padding: 10px;
   position: relative;
-}
-
-.shop-cost-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: #f0b429;
-  color: #1f1500;
-  border: 1px solid #ffd976;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 0.8rem;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .habitat-panel {
@@ -222,8 +267,9 @@ button {
 }
 
 .build-selected-slot {
-  outline: 2px solid #7bc1ff;
-  background: rgba(77, 139, 214, 0.2);
+  outline: 3px solid #ffd166;
+  box-shadow: 0 0 8px rgba(255, 209, 102, 0.6);
+  background: rgba(255, 209, 102, 0.14);
 }
 
 .monster-chip {
