@@ -57,6 +57,10 @@ const CONFIG = {
   }
 };
 
+const SHOP_SIZE = 3;
+const REROLL_INITIAL_COST = 4;
+const CHOICE_COUNT = 3;
+
 const INITIAL_STATE = () => ({
   phase: "build", // build | battle | reward | route | gameover
   round: 1,
@@ -109,9 +113,6 @@ const INITIAL_STATE = () => ({
 const gameState = INITIAL_STATE();
 const app = document.getElementById("app");
 const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスターを購入してリールに配置します" });
-const SHOP_SIZE = 3;
-const REROLL_INITIAL_COST = 4;
-const CHOICE_COUNT = 3;
 
 function resetBuildUiState() {
   gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
