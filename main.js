@@ -58,7 +58,7 @@ const INITIAL_STATE = () => ({
   selectedMonsterStar: 1,
   selectedSource: null, // shop | reel | null
   selectedSlotIndex: null,
-  mergeMode: false,
+  reelInteractionConfirm: null,
   pendingPlacement: null,
   pendingPurchaseSlotIndex: null,
   replacementConfirm: null,
@@ -129,12 +129,18 @@ function getUnitStar(slotValue) {
   return unit?.star ?? 1;
 }
 
-function formatStar(star = 1) {
-  return `☆${Math.max(1, star)}`;
+function getStarDisplay(level) {
+  if (!level || level < 1) return "";
+  return "☆".repeat(level);
 }
 
 function getMonsterStarLabel(unitLike) {
-  return formatStar(getUnitStar(unitLike));
+  return getStarDisplay(getUnitStar(unitLike));
+}
+
+function getMonsterNameWithStars(name, level) {
+  const stars = getStarDisplay(level);
+  return stars ? `${name} ${stars}` : name;
 }
 
 function clearReelSelection() {
@@ -339,6 +345,7 @@ function update(action, payload = {}) {
       if (gameState.phase !== "build") return;
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster) return;
+      gameState.reelInteractionConfirm = null;
       gameState.selectedMonsterId = monster.id;
       gameState.selectedMonsterStar = 1;
       gameState.selectedSource = "shop";
@@ -351,6 +358,7 @@ function update(action, payload = {}) {
       if (idx < 0 || idx >= gameState.reels.length) return;
       const unit = toReelUnit(gameState.reels[idx]);
       if (!unit) return;
+      gameState.reelInteractionConfirm = null;
       gameState.selectedMonsterId = unit.id;
       gameState.selectedMonsterStar = unit.star;
       gameState.selectedSource = "reel";
@@ -359,6 +367,7 @@ function update(action, payload = {}) {
     }
     case "clearSelection": {
       if (gameState.phase !== "build") return;
+      gameState.reelInteractionConfirm = null;
       clearReelSelection();
       return;
     }
@@ -393,6 +402,7 @@ function update(action, payload = {}) {
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
         gameState.replacementConfirm = null;
+        gameState.reelInteractionConfirm = null;
         gameState.buildStatus = { type: "info", text: `${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} を配置待ちです` };
         return;
       }
@@ -403,6 +413,7 @@ function update(action, payload = {}) {
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
         gameState.replacementConfirm = null;
+        gameState.reelInteractionConfirm = null;
         gameState.buildStatus = { type: "warn", text: `リール満員: ${monster.name}の配置先を選ぶと既存モンスターを売却して置き換えます` };
         return;
       }
@@ -491,15 +502,6 @@ function update(action, payload = {}) {
       gameState.buildStatus = { type: "info", text: "置き換えをキャンセルしました。配置先を選び直してください" };
       return;
     }
-    case "toggleMergeMode": {
-      if (gameState.phase !== "build") return;
-      gameState.mergeMode = !gameState.mergeMode;
-      gameState.buildStatus = {
-        type: "info",
-        text: gameState.mergeMode ? "マージモードON: 同ID/同レベルのみ重ねて強化" : "マージモードOFF: 通常は移動/入れ替え"
-      };
-      return;
-    }
     case "clearSlot": {
       if (gameState.phase !== "build") return;
       const idx = payload.index;
@@ -524,7 +526,8 @@ function update(action, payload = {}) {
       gameState.selectedMonsterStar = 1;
       gameState.selectedSource = null;
       gameState.selectedSlotIndex = null;
-      gameState.buildStatus = { type: "info", text: `${monster.name}${formatStar(unit.star)}を売却しました（+${sellValue}コイン）` };
+      gameState.reelInteractionConfirm = null;
+      gameState.buildStatus = { type: "info", text: `${getMonsterNameWithStars(monster.name, unit.star)}を売却しました（+${sellValue}コイン）` };
       return;
     }
     case "moveSelectedReelMonster": {
@@ -540,18 +543,67 @@ function update(action, payload = {}) {
       if (!toUnit) {
         moveReelMonster(from, to);
         gameState.buildStatus = { type: "info", text: "モンスターを移動しました" };
-      } else if (gameState.mergeMode && canMergeMonsters(fromUnit, toUnit)) {
-        gameState.reels[to] = mergeMonsters(fromUnit, toUnit);
-        gameState.reels[from] = null;
-        gameState.buildStatus = { type: "info", text: `${monsterById(toUnit.id)?.name ?? toUnit.id}が${formatStar(toUnit.star + 1)}に強化されました` };
+        gameState.reelInteractionConfirm = null;
+      } else if (canMergeMonsters(fromUnit, toUnit)) {
+        gameState.reelInteractionConfirm = {
+          fromIndex: from,
+          toIndex: to
+        };
+        gameState.buildStatus = { type: "warn", text: "同一モンスターです: 合成 / 入替 / キャンセル を選択してください" };
+        return;
       } else {
         swapReelSlots(from, to);
         gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
+        gameState.reelInteractionConfirm = null;
       }
       const selectedUnit = toReelUnit(gameState.reels[to]);
       gameState.selectedSlotIndex = to;
       gameState.selectedMonsterId = selectedUnit?.id ?? null;
       gameState.selectedMonsterStar = selectedUnit?.star ?? 1;
+      return;
+    }
+    case "confirmReelMerge": {
+      if (gameState.phase !== "build") return;
+      const confirm = gameState.reelInteractionConfirm;
+      if (!confirm) return;
+      const fromUnit = toReelUnit(gameState.reels[confirm.fromIndex]);
+      const toUnit = toReelUnit(gameState.reels[confirm.toIndex]);
+      if (!fromUnit || !toUnit || !canMergeMonsters(fromUnit, toUnit)) {
+        gameState.reelInteractionConfirm = null;
+        gameState.buildStatus = { type: "warn", text: "合成条件が変わったためキャンセルしました" };
+        return;
+      }
+      gameState.reels[confirm.toIndex] = mergeMonsters(fromUnit, toUnit);
+      gameState.reels[confirm.fromIndex] = null;
+      gameState.reelInteractionConfirm = null;
+      clearReelSelection();
+      gameState.buildStatus = { type: "info", text: "モンスターを合成しました" };
+      return;
+    }
+    case "confirmReelSwap": {
+      if (gameState.phase !== "build") return;
+      const confirm = gameState.reelInteractionConfirm;
+      if (!confirm) return;
+      const fromUnit = toReelUnit(gameState.reels[confirm.fromIndex]);
+      const toUnit = toReelUnit(gameState.reels[confirm.toIndex]);
+      if (!fromUnit || !toUnit) {
+        gameState.reelInteractionConfirm = null;
+        return;
+      }
+      swapReelSlots(confirm.fromIndex, confirm.toIndex);
+      const selectedUnit = toReelUnit(gameState.reels[confirm.toIndex]);
+      gameState.selectedSlotIndex = confirm.toIndex;
+      gameState.selectedMonsterId = selectedUnit?.id ?? null;
+      gameState.selectedMonsterStar = selectedUnit?.star ?? 1;
+      gameState.reelInteractionConfirm = null;
+      gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
+      return;
+    }
+    case "cancelReelInteraction": {
+      if (gameState.phase !== "build") return;
+      if (!gameState.reelInteractionConfirm) return;
+      gameState.reelInteractionConfirm = null;
+      gameState.buildStatus = { type: "info", text: "操作をキャンセルしました" };
       return;
     }
     case "startBattle": {
@@ -1012,11 +1064,17 @@ function renderBuildPhase() {
         <div class="phase-root">
           <section class="panel">
             <div class="shop-action-row">
-              <label style="display:flex;gap:8px;align-items:center;">
-                <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
-                配置先を選ぶ
-              </label>
-              <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
+              <div class="action-left">
+                <label style="display:flex;gap:8px;align-items:center;">
+                  <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
+                  手動配置
+                </label>
+                <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
+              </div>
+              <div class="action-right">
+                <button class="small btn-secondary" data-act="clear-selected" ${isReelSelection ? "" : "disabled"}>解除</button>
+                <button class="small btn-danger" data-act="sell-selected" ${canSell ? "" : "disabled"}>売却</button>
+              </div>
             </div>
             <div class="shop-grid">
               ${visibleShopEntries.map(
@@ -1027,7 +1085,7 @@ function renderBuildPhase() {
                   ${renderCostBadge(entry.monster)}
                   ${renderHabitatBand(entry.monster, "habitat-panel")}
                   <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <h4>${entry.monster.name} ${getMonsterStarLabel(createUnit(entry.monster.id, 1))}</h4>
+                    <h4>${getMonsterNameWithStars(entry.monster.name, 1)}</h4>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
                   <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
@@ -1064,7 +1122,7 @@ function renderBuildPhase() {
                             monster
                               ? `<div class="monster-chip ${monster.cls} sp-${monster.species}">
                                   ${renderHabitatBand(monster, "habitat-band-chip")}
-                                  <span>${monster.name}${formatStar(getUnitStar(slotValue))}</span>
+                                  <span>${getMonsterNameWithStars(monster.name, getUnitStar(slotValue))}</span>
                                 </div>`
                               : "空"
                           }
@@ -1097,39 +1155,36 @@ function renderBuildPhase() {
             }
           </section>
 
-          <section class="panel">
-            <h3>${pendingMonster ? "配置待ちモンスター" : "選択中モンスター"}</h3>
-            ${
-              pendingMonster
-                ? `<div class="monster-chip ${pendingMonster.cls} sp-${pendingMonster.species}">${pendingMonster.name} ${getMonsterStarLabel(gameState.pendingPlacement)}</div>
-                   <p>このモンスターをスロットに配置してください。</p>`
-                : selected
+          <section class="panel selected-info-panel">
+            <h3>選択中モンスター</h3>
+            <div class="selected-info-content">
+              ${
+                isReelSelection && selected
                   ? `${renderHabitatBand(selected, "habitat-panel")}
-                    <div class="monster-chip ${selected.cls} sp-${selected.species}">
-                      <span>${selected.name}${formatStar(selectedStar)}</span>
-                    </div>
-                    <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
-                    <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
-                    ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
-                    ${isReelSelection ? `<p>マージモード: ${gameState.mergeMode ? "ON" : "OFF"}</p>` : ""}
-                    ${
-                      isReelSelection
-                        ? '<button class="small btn-secondary" data-act="clear-selected">選択解除</button>'
-                        : ""
-                    }
-                    ${
-                      isReelSelection
-                        ? '<button class="small btn-secondary" data-act="toggle-merge-mode">マージモード切替</button>'
-                        : ""
-                    }
-                    ${
-                      canSell
-                        ? '<button class="small btn-danger" data-act="sell-selected">売却</button>'
-                        : ""
-                    }`
-                  : "<p class=\"muted\">未選択</p>"
-            }
+                     <div class="monster-chip ${selected.cls} sp-${selected.species}">
+                       <span>${getMonsterNameWithStars(selected.name, selectedStar)}</span>
+                     </div>
+                     <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
+                     <p class="selected-info-stats">コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
+                     <p>売却価格: ${sellValue}</p>`
+                  : `<div class="selected-info-placeholder">リールのモンスターを選択してください。</div>`
+              }
+            </div>
           </section>
+
+          ${
+            gameState.reelInteractionConfirm
+              ? `<section class="panel">
+                  <h3>移動方法を選択</h3>
+                  <p>同一モンスター/同一レベルです。</p>
+                  <div style="display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
+                    <button class="small btn-secondary" data-act="confirm-reel-swap">入替</button>
+                    <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
+                  </div>
+                </section>`
+              : ""
+          }
 
           ${
             gameState.replacementConfirm
@@ -1231,8 +1286,18 @@ function bindBuildEvents() {
     render();
   });
 
-  app.querySelector("[data-act='toggle-merge-mode']")?.addEventListener("click", () => {
-    update("toggleMergeMode");
+  app.querySelector("[data-act='confirm-reel-merge']")?.addEventListener("click", () => {
+    update("confirmReelMerge");
+    render();
+  });
+
+  app.querySelector("[data-act='confirm-reel-swap']")?.addEventListener("click", () => {
+    update("confirmReelSwap");
+    render();
+  });
+
+  app.querySelector("[data-act='cancel-reel-interaction']")?.addEventListener("click", () => {
+    update("cancelReelInteraction");
     render();
   });
 
@@ -1306,7 +1371,7 @@ function renderBattleGridCells() {
         m
           ? `<div class="monster-chip ${m.cls} sp-${m.species}">
               ${renderHabitatBand(m, "habitat-band-chip")}
-              <span>${m.name}${formatStar(unit.star)}</span>
+              <span>${getMonsterNameWithStars(m.name, unit.star)}</span>
             </div>`
           : '<div class="muted">Empty</div>'
       }</div>`;

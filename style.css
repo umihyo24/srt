@@ -129,6 +129,45 @@ button {
   margin-bottom: 8px;
 }
 
+.action-left,
+.action-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-right button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.selected-info-panel {
+  min-height: 220px;
+}
+
+.selected-info-content {
+  min-height: 170px;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 8px;
+  align-content: start;
+}
+
+.selected-info-stats {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selected-info-placeholder {
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px dashed #335a86;
+  border-radius: 8px;
+}
+
 .build-status-bar {
   min-height: 40px;
   max-height: 40px;
@@ -222,8 +261,9 @@ button {
 }
 
 .build-selected-slot {
-  outline: 2px solid #7bc1ff;
-  background: rgba(77, 139, 214, 0.2);
+  outline: 3px solid #ffd166;
+  box-shadow: 0 0 8px rgba(255, 209, 102, 0.6);
+  background: rgba(255, 209, 102, 0.14);
 }
 
 .monster-chip {
