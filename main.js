@@ -953,11 +953,6 @@ function renderHabitatBand(monster, className = "habitat-panel") {
   return `<div class="${className}" style="${buildHabitatPanelStyle(monster)}"></div>`;
 }
 
-function renderCostBadge(monster) {
-  if (!monster) return "";
-  return `<div class="shop-cost-badge">💰${monster.cost}</div>`;
-}
-
 function render() {
   switch (gameState.phase) {
     case "build":
@@ -1082,21 +1077,29 @@ function renderBuildPhase() {
                 <article class="card ${entry.monster.cls} ${entry.kept ? "shop-kept" : ""} ${
                   gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
                 }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
-                  ${renderCostBadge(entry.monster)}
                   ${renderHabitatBand(entry.monster, "habitat-panel")}
-                  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <h4>${getMonsterNameWithStars(entry.monster.name, 1)}</h4>
+                  <h4>${getMonsterNameWithStars(entry.monster.name, 1)}</h4>
+                  <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
+                  <div class="card-controls">
+                    <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}</button>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
-                  <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
-                  <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}</button>
                 </article>`
               ).join("")}
             </div>
             ${
               showShopStatus
-                ? `<div class="build-status-bar build-status-${buildStatus.type}" title="${buildStatus.text}">
-                    ${buildStatus.text}
+                ? `<div class="build-status-bar build-status-${buildStatus.type} ${gameState.reelInteractionConfirm ? "build-status-interaction" : ""}" title="${buildStatus.text}">
+                    <span>${buildStatus.text}</span>
+                    ${
+                      gameState.reelInteractionConfirm
+                        ? `<div class="build-status-actions">
+                            <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
+                            <button class="small btn-secondary" data-act="confirm-reel-swap">入替</button>
+                            <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
+                          </div>`
+                        : ""
+                    }
                   </div>`
                 : ""
             }

@@ -92,9 +92,16 @@ button {
 }
 
 .purchase-cost-btn {
-  padding: 9px 12px;
-  font-size: 0.9rem;
+  padding: 10px 14px;
+  font-size: 0.95rem;
   min-width: 78px;
+}
+
+.card-controls {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Build phase */
@@ -184,6 +191,20 @@ button {
   text-overflow: ellipsis;
 }
 
+.build-status-interaction {
+  max-height: none;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: normal;
+}
+
+.build-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .build-status-info {
   color: #cde4ff;
 }
@@ -197,21 +218,6 @@ button {
 .card {
   padding: 10px;
   position: relative;
-}
-
-.shop-cost-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  background: #f0b429;
-  color: #1f1500;
-  border: 1px solid #ffd976;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 0.8rem;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .habitat-panel {
