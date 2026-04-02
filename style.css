@@ -220,6 +220,10 @@ button {
   position: relative;
 }
 
+.card[data-act] {
+  cursor: pointer;
+}
+
 .habitat-panel {
   height: 14px;
   border-radius: 6px;
@@ -232,9 +236,16 @@ button {
   box-shadow: inset 0 0 0 1px rgba(255, 207, 114, 0.45);
 }
 
-.shop-kept {
+.shop-locked {
   border-color: #7cd0ff;
   box-shadow: inset 0 0 0 1px rgba(124, 208, 255, 0.35);
+}
+
+.reward-coin-card {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  text-align: center;
 }
 
 .card h4,
