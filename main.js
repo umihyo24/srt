@@ -57,8 +57,21 @@ const ROUTE_CHOICES = [
 ];
 
 const CONFIG = {
+  REEL: {
+    COLS: 3,
+    INITIAL_ROWS: 4,
+    MAX_ROWS: 6,
+    UNLOCK_ROUNDS: [4, 7]
+  },
   COMBO: {
-    ALIGN_TRIPLE_BONUS: 4
+    ALIGN_TRIPLE_BONUS: 4,
+    VALID_LINES: [
+      [0, 1, 2],
+      [3, 4, 5],
+      [6, 7, 8],
+      [0, 4, 8],
+      [2, 4, 6]
+    ]
   },
   HABITAT: {
     TRIGGER_COUNT: 3,
@@ -127,6 +140,7 @@ const INITIAL_STATE = () => ({
   pendingRewardType: null, // normal | charisma | null
   pendingRewardRouteId: null,
   selectedRewardType: null, // monster | coins | null
+  unlockedRows: CONFIG.REEL.INITIAL_ROWS,
   normalRewardChoices: [],
   defeatedEnemyChoices: [],
   reels: Array(18).fill(null),
@@ -157,6 +171,26 @@ const DEFAULT_BUILD_STATUS = Object.freeze({ type: "info", text: "モンスタ�
 
 function resetBuildUiState() {
   gameState.buildStatus = { ...DEFAULT_BUILD_STATUS };
+}
+
+function getUnlockedRowsForRound(round) {
+  const unlockCount = CONFIG.REEL.UNLOCK_ROUNDS.filter((unlockRound) => round >= unlockRound).length;
+  return Math.min(CONFIG.REEL.MAX_ROWS, CONFIG.REEL.INITIAL_ROWS + unlockCount);
+}
+
+function getUnlockedReelIndices(rows = gameState.unlockedRows) {
+  const safeRows = Math.max(1, Math.min(CONFIG.REEL.MAX_ROWS, rows));
+  const indices = [];
+  for (let row = 0; row < safeRows; row += 1) {
+    for (let col = 0; col < CONFIG.REEL.COLS; col += 1) {
+      indices.push(row * CONFIG.REEL.COLS + col);
+    }
+  }
+  return indices;
+}
+
+function isUnlockedReelIndex(index, rows = gameState.unlockedRows) {
+  return getUnlockedReelIndices(rows).includes(index);
 }
 
 function getSellValue(monster) {
@@ -555,12 +589,17 @@ function canPickClass(classId) {
 }
 
 function enterBuildPhaseFromReward() {
+  const prevUnlockedRows = gameState.unlockedRows;
   const beastTamerCount = countOwnedClass("beast_tamer");
   if (beastTamerCount > 0) {
     gameState.coins += beastTamerCount * 2;
   }
   gameState.phase = "build";
+  gameState.unlockedRows = getUnlockedRowsForRound(gameState.round);
   resetBuildUiState();
+  if (gameState.unlockedRows > prevUnlockedRows) {
+    gameState.buildStatus = { type: "info", text: `リール拡張！ ${CONFIG.REEL.COLS}x${gameState.unlockedRows} が開放されました` };
+  }
   gameState.shopChoices = refreshShopEntriesForNextBuild(gameState.shopChoices);
   gameState.defeatedEnemyChoices = [];
   gameState.normalRewardChoices = [];
@@ -603,7 +642,7 @@ function update(action, payload = {}) {
       if (!canEditReelInCurrentPhase()) return;
       if (gameState.replacementConfirm || gameState.reelInteractionConfirm) return;
       const idx = payload.index;
-      if (idx < 0 || idx >= gameState.reels.length) return;
+      if (!isUnlockedReelIndex(idx)) return;
       const unit = toReelUnit(gameState.reels[idx]);
       if (!unit) return;
       cleanupAfterBuildAction({ clearSelection: false });
@@ -705,7 +744,7 @@ function update(action, payload = {}) {
       if (gameState.pendingPlacement === null) return;
       if (gameState.reelInteractionConfirm) return;
       const idx = payload.index;
-      if (idx < 0 || idx >= gameState.reels.length) return;
+      if (!isUnlockedReelIndex(idx)) return;
       const { applied } = applyPendingPlacementToSlot(idx);
       if (!applied) return;
       clearPendingPlacementState({ rerollPurchasedSlot: gameState.phase === "build" });
@@ -755,7 +794,7 @@ function update(action, payload = {}) {
     case "clearSlot": {
       if (gameState.phase !== "build") return;
       const idx = payload.index;
-      if (idx < 0 || idx >= gameState.reels.length) return;
+      if (!isUnlockedReelIndex(idx)) return;
       gameState.reels[idx] = null;
       return;
     }
@@ -764,7 +803,7 @@ function update(action, payload = {}) {
       if (gameState.pendingPlacement !== null) return;
       if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
       const idx = gameState.selectedSlotIndex;
-      if (idx < 0 || idx >= gameState.reels.length) return;
+      if (!isUnlockedReelIndex(idx)) return;
       const unit = toReelUnit(gameState.reels[idx]);
       if (!unit) return;
       const monster = monsterById(unit.id);
@@ -783,7 +822,7 @@ function update(action, payload = {}) {
       if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
       const from = gameState.selectedSlotIndex;
       const to = Number(payload.index);
-      if (to < 0 || to >= gameState.reels.length || from === to) return;
+      if (!isUnlockedReelIndex(from) || !isUnlockedReelIndex(to) || from === to) return;
       const fromUnit = toReelUnit(gameState.reels[from]);
       if (!fromUnit) return;
       const toUnit = toReelUnit(gameState.reels[to]);
@@ -1065,7 +1104,8 @@ function update(action, payload = {}) {
 }
 
 function getReelStrip(reels, reelIndex) {
-  return Array.from({ length: 6 }, (_, row) => reels[row * 3 + reelIndex] ?? null);
+  const rowCount = Math.max(1, Math.min(CONFIG.REEL.MAX_ROWS, gameState.unlockedRows));
+  return Array.from({ length: rowCount }, (_, row) => reels[row * CONFIG.REEL.COLS + reelIndex] ?? null);
 }
 
 function getVisibleWindowFromStop(strip, stopIndex, visibleRows = 3) {
@@ -1086,7 +1126,7 @@ function getVisualOrderIndices(cols, rows) {
 }
 
 function getFirstEmptyVisualSlotIndex(reels) {
-  const visualOrder = getVisualOrderIndices(3, 6);
+  const visualOrder = getVisualOrderIndices(CONFIG.REEL.COLS, gameState.unlockedRows);
   return visualOrder.find((idx) => reels[idx] === null) ?? -1;
 }
 
@@ -1130,16 +1170,9 @@ function getVisibleGridCounts(visibleGrid) {
   );
 }
 
-function findAlignedTripleCombos(visibleGrid) {
+function findValidComboLines(visibleGrid) {
   const safeGrid = Array.isArray(visibleGrid) ? visibleGrid : [];
-  const comboLines = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 4, 8],
-    [2, 4, 6]
-  ];
-  return comboLines.reduce((acc, positions) => {
+  return CONFIG.COMBO.VALID_LINES.reduce((acc, positions) => {
     const [a, b, c] = positions;
     const unitA = toReelUnit(safeGrid[a]);
     const unitB = toReelUnit(safeGrid[b]);
@@ -1232,7 +1265,7 @@ function calcDamageBreakdown(grid, classSlots = []) {
     if (classId === "lucky_strike" && (baseDamage + classBonusDamage) % 2 === 1) classBonusDamage += 2;
   });
 
-  const comboTriggers = findAlignedTripleCombos(safeGrid);
+  const comboTriggers = findValidComboLines(safeGrid);
   const triggeredEffects = [];
   comboTriggers.forEach((trigger) => {
     const participants = getComboParticipants(safeGrid, trigger.positions);
@@ -1471,7 +1504,9 @@ function renderBuildPhase() {
     || buildStatus.text !== DEFAULT_BUILD_STATUS.text
     || Boolean(gameState.pendingPlacement)
     || Boolean(gameState.replacementConfirm);
-  const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
+  const reels = Array.from({ length: CONFIG.REEL.COLS }, (_, col) => (
+    Array.from({ length: gameState.unlockedRows }, (_, row) => gameState.reels[row * CONFIG.REEL.COLS + col] ?? null)
+  ));
 
   app.innerHTML = `
     <div class="phase-root">
@@ -1482,6 +1517,7 @@ function renderBuildPhase() {
             <div class="badge">ラウンド ${gameState.round}</div>
             <div class="badge">コイン ${gameState.coins}</div>
             <div class="badge">HP ${gameState.hp}</div>
+            <div class="badge">リール ${CONFIG.REEL.COLS}x${gameState.unlockedRows}</div>
           </div>
         </div>
       </div>
@@ -1970,7 +2006,9 @@ function renderRewardPhase() {
       .map((id) => monsterById(id))
       .filter(Boolean);
     const coinRewardValue = CONFIG.REWARD.BASE_COIN_OPTION + (rewardRoute.rewardCoinBonus ?? 0);
-    const reels = [0, 1, 2].map((r) => gameState.reels.filter((_, idx) => idx % 3 === r));
+    const reels = Array.from({ length: CONFIG.REEL.COLS }, (_, col) => (
+      Array.from({ length: gameState.unlockedRows }, (_, row) => gameState.reels[row * CONFIG.REEL.COLS + col] ?? null)
+    ));
     const rewardStatus = getBuildStatusDisplay();
     const mode = getBuildInteractionMode();
     const statusForReward =
