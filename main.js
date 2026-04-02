@@ -174,6 +174,38 @@ function clearReelSelection() {
   gameState.selectedSlotIndex = null;
 }
 
+function clearBuildInteractionFlags() {
+  gameState.reelInteractionConfirm = null;
+  gameState.replacementConfirm = null;
+}
+
+function cleanupAfterBuildAction({ clearSelection = true } = {}) {
+  clearBuildInteractionFlags();
+  if (clearSelection) clearReelSelection();
+}
+
+function clearPendingPlacementState({ rerollPurchasedSlot = false } = {}) {
+  if (rerollPurchasedSlot && gameState.pendingPurchaseSlotIndex !== null) {
+    gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
+  }
+  gameState.pendingPlacement = null;
+  gameState.pendingPurchaseSlotIndex = null;
+}
+
+function beginPendingPlacement(unit, slotIndex) {
+  gameState.pendingPlacement = toReelUnit(unit);
+  gameState.pendingPurchaseSlotIndex = slotIndex;
+  cleanupAfterBuildAction();
+}
+
+function getBuildInteractionMode() {
+  if (gameState.replacementConfirm) return "replacement_confirm";
+  if (gameState.reelInteractionConfirm) return "reel_interaction_confirm";
+  if (gameState.pendingPlacement) return "pending_placement";
+  if (gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null) return "selecting_reel";
+  return "idle";
+}
+
 function canMergeMonsters(sourceUnit, targetUnit) {
   const src = toReelUnit(sourceUnit);
   const dst = toReelUnit(targetUnit);
@@ -236,6 +268,36 @@ function applyReplacementWithSell(targetIndex) {
     const incomingMonster = monsterById(incoming.id);
     gameState.buildStatus = { type: "info", text: `${incomingMonster?.name ?? "モンスター"} ${getMonsterStarLabel(incoming)} を配置しました` };
   }
+}
+
+function applyPendingPlacementToSlot(targetIndex) {
+  const incomingUnit = toReelUnit(gameState.pendingPlacement);
+  if (!incomingUnit) return { applied: false };
+  const existingUnit = toReelUnit(gameState.reels[targetIndex]);
+  if (!existingUnit) {
+    applyReplacementWithSell(targetIndex);
+    return { applied: true };
+  }
+  if (canMergeMonsters(incomingUnit, existingUnit)) {
+    gameState.replacementConfirm = {
+      type: "merge",
+      targetIndex,
+      targetUnit: existingUnit,
+      incomingUnit
+    };
+    gameState.buildStatus = { type: "warn", text: "合成確認中: 既存モンスターと合成しますか？" };
+    return { applied: false };
+  }
+  const preview = getReplacementPreview(incomingUnit, existingUnit);
+  gameState.replacementConfirm = {
+    type: "replace",
+    targetIndex,
+    targetUnit: preview?.target ?? existingUnit,
+    incomingUnit: preview?.incoming ?? incomingUnit,
+    sellValue: preview?.sellValue ?? 0
+  };
+  gameState.buildStatus = { type: "warn", text: "置き換え確認中: 既存モンスターを売却して配置しますか？" };
+  return { applied: false };
 }
 
 function rollShopChoices(pool, choiceCount = SHOP_SIZE) {
@@ -435,9 +497,10 @@ function update(action, payload = {}) {
     }
     case "selectShopMonster": {
       if (gameState.phase !== "build") return;
+      if (gameState.replacementConfirm || gameState.reelInteractionConfirm) return;
       const monster = MONSTERS.find((m) => m.id === payload.monsterId);
       if (!monster) return;
-      gameState.reelInteractionConfirm = null;
+      cleanupAfterBuildAction();
       gameState.selectedMonsterId = monster.id;
       gameState.selectedMonsterStar = 1;
       gameState.selectedSource = "shop";
@@ -446,11 +509,12 @@ function update(action, payload = {}) {
     }
     case "selectReelSlot": {
       if (gameState.phase !== "build") return;
+      if (gameState.replacementConfirm || gameState.reelInteractionConfirm) return;
       const idx = payload.index;
       if (idx < 0 || idx >= gameState.reels.length) return;
       const unit = toReelUnit(gameState.reels[idx]);
       if (!unit) return;
-      gameState.reelInteractionConfirm = null;
+      cleanupAfterBuildAction({ clearSelection: false });
       gameState.selectedMonsterId = unit.id;
       gameState.selectedMonsterStar = unit.star;
       gameState.selectedSource = "reel";
@@ -459,8 +523,11 @@ function update(action, payload = {}) {
     }
     case "clearSelection": {
       if (gameState.phase !== "build") return;
-      gameState.reelInteractionConfirm = null;
-      clearReelSelection();
+      if (gameState.pendingPlacement || gameState.replacementConfirm || gameState.reelInteractionConfirm) {
+        gameState.buildStatus = { type: "warn", text: "確認中または配置待ちの操作を完了/キャンセルしてください" };
+        return;
+      }
+      cleanupAfterBuildAction();
       return;
     }
     case "buyMonster": {
@@ -471,10 +538,7 @@ function update(action, payload = {}) {
       const purchaseCost = getShopEntryCost(entry, monster);
       if (!monster || gameState.phase !== "build") return;
       if (payload.monsterId && payload.monsterId !== monster.id) return;
-      gameState.selectedMonsterId = monster.id;
-      gameState.selectedMonsterStar = 1;
-      gameState.selectedSource = "shop";
-      gameState.selectedSlotIndex = null;
+      cleanupAfterBuildAction();
       if (gameState.pendingPlacement !== null) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
@@ -490,12 +554,11 @@ function update(action, payload = {}) {
       }
       gameState.selectedMonsterId = monster.id;
       gameState.selectedMonsterStar = 1;
+      gameState.selectedSource = "shop";
+      gameState.selectedSlotIndex = null;
       if (gameState.buildManualPlacement) {
         gameState.coins -= purchaseCost;
-        gameState.pendingPlacement = createUnit(monster.id, 1);
-        gameState.pendingPurchaseSlotIndex = slotIndex;
-        gameState.replacementConfirm = null;
-        gameState.reelInteractionConfirm = null;
+        beginPendingPlacement(createUnit(monster.id, 1), slotIndex);
         gameState.buildStatus = { type: "info", text: `${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} を配置待ちです` };
         return;
       }
@@ -503,10 +566,7 @@ function update(action, payload = {}) {
       const emptyIndex = getFirstEmptyVisualSlotIndex(gameState.reels);
       if (emptyIndex === -1) {
         gameState.coins -= purchaseCost;
-        gameState.pendingPlacement = createUnit(monster.id, 1);
-        gameState.pendingPurchaseSlotIndex = slotIndex;
-        gameState.replacementConfirm = null;
-        gameState.reelInteractionConfirm = null;
+        beginPendingPlacement(createUnit(monster.id, 1), slotIndex);
         gameState.buildStatus = { type: "warn", text: `リール満員: ${monster.name}の配置先を選ぶと既存モンスターを売却して置き換えます` };
         return;
       }
@@ -545,59 +605,47 @@ function update(action, payload = {}) {
     case "placePendingMonster": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement === null) return;
+      if (gameState.reelInteractionConfirm) return;
       const idx = payload.index;
       if (idx < 0 || idx >= gameState.reels.length) return;
-      const incomingUnit = toReelUnit(gameState.pendingPlacement);
-      if (!incomingUnit) return;
-      const existingUnit = toReelUnit(gameState.reels[idx]);
-      if (existingUnit && canMergeMonsters(incomingUnit, existingUnit)) {
-        const merged = mergeMonsters(incomingUnit, existingUnit);
-        gameState.reels[idx] = merged;
-        const mergedMonster = monsterById(merged.id);
-        gameState.buildStatus = {
-          type: "info",
-          text: `${mergedMonster?.name ?? "モンスター"}どうしが合成！ ${getMonsterStarLabel(merged)}になった！`
-        };
-      } else if (existingUnit) {
-        const preview = getReplacementPreview(incomingUnit, existingUnit);
-        gameState.replacementConfirm = {
-          targetIndex: idx,
-          targetUnit: preview?.target ?? existingUnit,
-          incomingUnit: preview?.incoming ?? incomingUnit,
-          sellValue: preview?.sellValue ?? 0
-        };
-        gameState.buildStatus = { type: "warn", text: "置き換え確認中: 右パネルで確定またはキャンセルしてください" };
-        return;
-      } else {
-        applyReplacementWithSell(idx);
-      }
-      gameState.pendingPlacement = null;
-      if (gameState.pendingPurchaseSlotIndex !== null) {
-        gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
-      }
-      gameState.pendingPurchaseSlotIndex = null;
-      gameState.replacementConfirm = null;
-      clearReelSelection();
+      const { applied } = applyPendingPlacementToSlot(idx);
+      if (!applied) return;
+      clearPendingPlacementState({ rerollPurchasedSlot: true });
+      cleanupAfterBuildAction();
       return;
     }
     case "confirmReplacement": {
       if (gameState.phase !== "build") return;
       if (!gameState.replacementConfirm || gameState.pendingPlacement === null) return;
-      applyReplacementWithSell(gameState.replacementConfirm.targetIndex);
-      gameState.pendingPlacement = null;
-      if (gameState.pendingPurchaseSlotIndex !== null) {
-        gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
+      const confirm = gameState.replacementConfirm;
+      const targetIndex = confirm.targetIndex;
+      if (confirm.type === "merge") {
+        const incoming = toReelUnit(gameState.pendingPlacement);
+        const existing = toReelUnit(gameState.reels[targetIndex]);
+        if (!incoming || !existing || !canMergeMonsters(incoming, existing)) {
+          cleanupAfterBuildAction({ clearSelection: false });
+          gameState.buildStatus = { type: "warn", text: "合成条件が変わったためキャンセルしました" };
+          return;
+        }
+        const merged = mergeMonsters(incoming, existing);
+        gameState.reels[targetIndex] = merged;
+        const mergedMonster = monsterById(merged.id);
+        gameState.buildStatus = {
+          type: "info",
+          text: `${mergedMonster?.name ?? "モンスター"}を合成しました（${getMonsterStarLabel(merged)}）`
+        };
+      } else {
+        applyReplacementWithSell(targetIndex);
       }
-      gameState.pendingPurchaseSlotIndex = null;
-      gameState.replacementConfirm = null;
-      clearReelSelection();
+      clearPendingPlacementState({ rerollPurchasedSlot: true });
+      cleanupAfterBuildAction();
       return;
     }
     case "cancelReplacement": {
       if (gameState.phase !== "build") return;
       if (!gameState.replacementConfirm) return;
-      gameState.replacementConfirm = null;
-      gameState.buildStatus = { type: "info", text: "置き換えをキャンセルしました。配置先を選び直してください" };
+      cleanupAfterBuildAction({ clearSelection: false });
+      gameState.buildStatus = { type: "info", text: "確認をキャンセルしました。配置先を選び直してください" };
       return;
     }
     case "clearSlot": {
@@ -620,17 +668,14 @@ function update(action, payload = {}) {
       const sellValue = getSellValue(monster);
       gameState.coins += sellValue;
       gameState.reels[idx] = null;
-      gameState.selectedMonsterId = null;
-      gameState.selectedMonsterStar = 1;
-      gameState.selectedSource = null;
-      gameState.selectedSlotIndex = null;
-      gameState.reelInteractionConfirm = null;
+      cleanupAfterBuildAction();
       gameState.buildStatus = { type: "info", text: `${getMonsterNameWithStars(monster.name, unit.star)}を売却しました（+${sellValue}コイン）` };
       return;
     }
     case "moveSelectedReelMonster": {
       if (gameState.phase !== "build") return;
       if (gameState.pendingPlacement !== null) return;
+      if (gameState.reelInteractionConfirm || gameState.replacementConfirm) return;
       if (gameState.selectedSource !== "reel" || gameState.selectedSlotIndex === null) return;
       const from = gameState.selectedSlotIndex;
       const to = Number(payload.index);
@@ -641,8 +686,9 @@ function update(action, payload = {}) {
       if (!toUnit) {
         moveReelMonster(from, to);
         gameState.buildStatus = { type: "info", text: "モンスターを移動しました" };
-        gameState.reelInteractionConfirm = null;
+        cleanupAfterBuildAction();
       } else if (canMergeMonsters(fromUnit, toUnit)) {
+        cleanupAfterBuildAction({ clearSelection: false });
         gameState.reelInteractionConfirm = {
           fromIndex: from,
           toIndex: to
@@ -652,12 +698,8 @@ function update(action, payload = {}) {
       } else {
         swapReelSlots(from, to);
         gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
-        gameState.reelInteractionConfirm = null;
+        cleanupAfterBuildAction();
       }
-      const selectedUnit = toReelUnit(gameState.reels[to]);
-      gameState.selectedSlotIndex = to;
-      gameState.selectedMonsterId = selectedUnit?.id ?? null;
-      gameState.selectedMonsterStar = selectedUnit?.star ?? 1;
       return;
     }
     case "confirmReelMerge": {
@@ -667,14 +709,13 @@ function update(action, payload = {}) {
       const fromUnit = toReelUnit(gameState.reels[confirm.fromIndex]);
       const toUnit = toReelUnit(gameState.reels[confirm.toIndex]);
       if (!fromUnit || !toUnit || !canMergeMonsters(fromUnit, toUnit)) {
-        gameState.reelInteractionConfirm = null;
+        cleanupAfterBuildAction();
         gameState.buildStatus = { type: "warn", text: "合成条件が変わったためキャンセルしました" };
         return;
       }
       gameState.reels[confirm.toIndex] = mergeMonsters(fromUnit, toUnit);
       gameState.reels[confirm.fromIndex] = null;
-      gameState.reelInteractionConfirm = null;
-      clearReelSelection();
+      cleanupAfterBuildAction();
       gameState.buildStatus = { type: "info", text: "モンスターを合成しました" };
       return;
     }
@@ -685,22 +726,18 @@ function update(action, payload = {}) {
       const fromUnit = toReelUnit(gameState.reels[confirm.fromIndex]);
       const toUnit = toReelUnit(gameState.reels[confirm.toIndex]);
       if (!fromUnit || !toUnit) {
-        gameState.reelInteractionConfirm = null;
+        cleanupAfterBuildAction();
         return;
       }
       swapReelSlots(confirm.fromIndex, confirm.toIndex);
-      const selectedUnit = toReelUnit(gameState.reels[confirm.toIndex]);
-      gameState.selectedSlotIndex = confirm.toIndex;
-      gameState.selectedMonsterId = selectedUnit?.id ?? null;
-      gameState.selectedMonsterStar = selectedUnit?.star ?? 1;
-      gameState.reelInteractionConfirm = null;
+      cleanupAfterBuildAction();
       gameState.buildStatus = { type: "info", text: "スロットを入れ替えました" };
       return;
     }
     case "cancelReelInteraction": {
       if (gameState.phase !== "build") return;
       if (!gameState.reelInteractionConfirm) return;
-      gameState.reelInteractionConfirm = null;
+      cleanupAfterBuildAction();
       gameState.buildStatus = { type: "info", text: "操作をキャンセルしました" };
       return;
     }
@@ -1015,13 +1052,19 @@ function calculateStarComboMultiplier(participants = []) {
 
 function buildTriggeredEffectLogs(effectBreakdown) {
   if (!effectBreakdown) return [];
+  const participantsText = effectBreakdown.participants.length > 0
+    ? effectBreakdown.participants.map((unit) => formatUnitForLog(unit)).join(" / ")
+    : "なし";
+  const starEffects = [];
+  if (effectBreakdown.star2Count > 0) starEffects.push(`☆☆x${1 + effectBreakdown.star2Count}`);
+  if (effectBreakdown.star3Count > 0) starEffects.push(`☆☆☆x${(1 + effectBreakdown.star3Count) ** 2}`);
   const lines = [
-    `${effectBreakdown.name}！ +${effectBreakdown.baseDamage}`,
-    `→ ${effectBreakdown.participants.map((unit) => formatUnitForLog(unit)).join(" / ")}`
+    `効果: ${effectBreakdown.name}`,
+    `→ 基礎ダメージ: ${effectBreakdown.baseDamage}`,
+    `→ 参加ユニット: ${participantsText}`,
+    `→ 星効果: ${starEffects.length > 0 ? starEffects.join(" + ") : "なし"}`,
+    `→ 最終ダメージ: ${effectBreakdown.finalDamage}`
   ];
-  if (effectBreakdown.star2Count > 0) lines.push(`→ ☆☆効果 x${1 + effectBreakdown.star2Count}`);
-  if (effectBreakdown.star3Count > 0) lines.push(`→ ☆☆☆効果 x${(1 + effectBreakdown.star3Count) ** 2}`);
-  lines.push(`→ 合計 +${effectBreakdown.finalDamage}`);
   return lines;
 }
 
@@ -1181,14 +1224,31 @@ function getBuildStatusDisplay() {
   if (status.code === "insufficient_coins" && gameState.coins >= (status.requiredCoins ?? Infinity)) {
     return { ...DEFAULT_BUILD_STATUS };
   }
+  const mode = getBuildInteractionMode();
+  if (mode === "reel_interaction_confirm") {
+    return { type: "warn", text: "確認中: 合成 / 入替 / キャンセル を選択してください" };
+  }
+  if (mode === "replacement_confirm") {
+    if (gameState.replacementConfirm?.type === "merge") {
+      return { type: "warn", text: "合成確認中: 配置待ちモンスターとの合成を確定してください" };
+    }
+    return { type: "warn", text: "置き換え確認中: 売却して配置するか選択してください" };
+  }
   if (gameState.pendingPlacement) {
     const monster = getUnitMonster(gameState.pendingPlacement);
     if (monster) {
       return {
         type: "info",
-        text: `配置待ち: ${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} を18スロットのどこかへ配置してください`
+        text: `配置モード: ${monster.name} ${getMonsterStarLabel(gameState.pendingPlacement)} の配置先を選択してください`
       };
     }
+  }
+  if (mode === "selecting_reel") {
+    const selectedMonster = monsterById(gameState.selectedMonsterId);
+    return {
+      type: "info",
+      text: `選択中: ${selectedMonster?.name ?? "モンスター"} を移動先スロットへクリックしてください`
+    };
   }
   return status;
 }
@@ -1397,13 +1457,18 @@ function renderBuildPhase() {
           ${
             gameState.replacementConfirm
               ? `<section class="panel">
-                  <h3>置き換え確認</h3>
-                  <p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} を売却して、</p>
-                  <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を配置しますか？</p>
-                  <p>売却額: +${gameState.replacementConfirm.sellValue}コイン</p>
+                  <h3>${gameState.replacementConfirm.type === "merge" ? "合成確認" : "置き換え確認"}</h3>
+                  ${
+                    gameState.replacementConfirm.type === "merge"
+                      ? `<p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} と</p>
+                         <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を合成しますか？</p>`
+                      : `<p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} を売却して、</p>
+                         <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を配置しますか？</p>
+                         <p>売却額: +${gameState.replacementConfirm.sellValue}コイン</p>`
+                  }
                   <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button class="small btn-secondary" data-act="cancel-replacement">キャンセル</button>
-                    <button class="small btn-danger" data-act="confirm-replacement">置き換える</button>
+                    <button class="small btn-danger" data-act="confirm-replacement">${gameState.replacementConfirm.type === "merge" ? "合成する" : "置き換える"}</button>
                   </div>
                 </section>`
               : ""
