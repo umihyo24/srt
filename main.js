@@ -159,6 +159,14 @@ function getMonsterNameWithStars(name, level) {
   return stars ? `${name} ${stars}` : name;
 }
 
+function formatUnitForLog(unitLike) {
+  const unit = toReelUnit(unitLike);
+  if (!unit) return "不明";
+  const monster = monsterById(unit.id);
+  const name = monster?.name ?? unit.id;
+  return `${name}${getStarDisplay(unit.star)}`;
+}
+
 function clearReelSelection() {
   gameState.selectedMonsterId = null;
   gameState.selectedMonsterStar = 1;
@@ -975,6 +983,48 @@ function formatComboPositionText(positions) {
   return `（${positions.map((index) => getGridPositionLabel(index)).join("・")}）`;
 }
 
+function getComboParticipants(grid, positions = []) {
+  return positions
+    .map((index) => toReelUnit(grid[index]))
+    .filter(Boolean)
+    .map((unit) => ({ id: unit.id, name: monsterById(unit.id)?.name ?? unit.id, star: unit.star }));
+}
+
+function getHabitatParticipants(grid, habitat, requiredCount = 3) {
+  const participants = [];
+  grid.forEach((slotValue) => {
+    if (participants.length >= requiredCount) return;
+    const unit = toReelUnit(slotValue);
+    if (!unit) return;
+    const monster = monsterById(unit.id);
+    if (!monster) return;
+    if (!getMonsterHabitats(monster).includes(habitat)) return;
+    participants.push({ id: unit.id, name: monster.name, star: unit.star });
+  });
+  return participants;
+}
+
+function calculateStarComboMultiplier(participants = []) {
+  const star2Count = participants.filter((unit) => unit.star === 2).length;
+  const star3Count = participants.filter((unit) => unit.star === 3).length;
+  let multiplier = 1;
+  if (star2Count > 0) multiplier *= (1 + star2Count);
+  if (star3Count > 0) multiplier *= (1 + star3Count) ** 2;
+  return { star2Count, star3Count, multiplier };
+}
+
+function buildTriggeredEffectLogs(effectBreakdown) {
+  if (!effectBreakdown) return [];
+  const lines = [
+    `${effectBreakdown.name}！ +${effectBreakdown.baseDamage}`,
+    `→ ${effectBreakdown.participants.map((unit) => formatUnitForLog(unit)).join(" / ")}`
+  ];
+  if (effectBreakdown.star2Count > 0) lines.push(`→ ☆☆効果 x${1 + effectBreakdown.star2Count}`);
+  if (effectBreakdown.star3Count > 0) lines.push(`→ ☆☆☆効果 x${(1 + effectBreakdown.star3Count) ** 2}`);
+  lines.push(`→ 合計 +${effectBreakdown.finalDamage}`);
+  return lines;
+}
+
 function calcDamageBreakdown(grid, classSlots = []) {
   const safeGrid = Array.isArray(grid) ? grid : [];
   let baseDamage = 0;
@@ -1000,9 +1050,47 @@ function calcDamageBreakdown(grid, classSlots = []) {
   });
 
   const comboTriggers = findAlignedTripleCombos(safeGrid);
-  const comboBonusDamage = comboTriggers.length * CONFIG.COMBO.ALIGN_TRIPLE_BONUS;
+  const triggeredEffects = [];
+  comboTriggers.forEach((trigger) => {
+    const participants = getComboParticipants(safeGrid, trigger.positions);
+    const { star2Count, star3Count, multiplier } = calculateStarComboMultiplier(participants);
+    const monster = monsterById(trigger.monsterId);
+    const name = `トリプル${monster?.name ?? trigger.monsterId}`;
+    const baseComboDamage = CONFIG.COMBO.ALIGN_TRIPLE_BONUS;
+    const finalDamage = baseComboDamage * multiplier;
+    triggeredEffects.push({
+      type: "combo",
+      name,
+      baseDamage: baseComboDamage,
+      participants,
+      star2Count,
+      star3Count,
+      multiplier,
+      finalDamage,
+      positions: trigger.positions
+    });
+  });
+
   const { habitatCounts } = getVisibleGridCounts(safeGrid);
-  const habitatBonusDamage = (habitatCounts.forest ?? 0) >= 3 ? CONFIG.HABITAT.FOREST_SYNERGY_BONUS : 0;
+  if ((habitatCounts.forest ?? 0) >= 3) {
+    const participants = getHabitatParticipants(safeGrid, "forest", 3);
+    const { star2Count, star3Count, multiplier } = calculateStarComboMultiplier(participants);
+    const baseHabitatDamage = CONFIG.HABITAT.FOREST_SYNERGY_BONUS;
+    const finalDamage = baseHabitatDamage * multiplier;
+    triggeredEffects.push({
+      type: "habitat",
+      name: "森の仲間たち",
+      baseDamage: baseHabitatDamage,
+      participants,
+      star2Count,
+      star3Count,
+      multiplier,
+      finalDamage
+    });
+  }
+
+  const comboBonusDamage = triggeredEffects.reduce((sum, effect) => sum + effect.finalDamage, 0);
+  const habitatBonusDamage = 0;
   const totalDamage = baseDamage + comboBonusDamage + habitatBonusDamage + classBonusDamage;
 
   return {
@@ -1011,6 +1099,7 @@ function calcDamageBreakdown(grid, classSlots = []) {
     comboBonusDamage,
     habitatBonusDamage,
     comboTriggers,
+    triggeredEffects,
     totalDamage
   };
 }
@@ -1019,17 +1108,14 @@ function buildPlayerResultMessages(damageBreakdown) {
   if (!damageBreakdown) return ["味方の攻撃！ 0ダメージ", "合計0ダメージ！！"];
 
   const lines = [`味方の攻撃！ ${damageBreakdown.baseDamage}ダメージ`];
-  if (damageBreakdown.comboTriggers.length > 0) {
+  if (damageBreakdown.triggeredEffects.length > 0) {
     lines.push("連携コンボ！");
-    damageBreakdown.comboTriggers.forEach((trigger) => {
-      const monster = monsterById(trigger.monsterId);
-      const name = monster?.name ?? trigger.monsterId;
-      lines.push(`トリプル${name}！！ +${CONFIG.COMBO.ALIGN_TRIPLE_BONUS}`);
-      lines.push(formatComboPositionText(trigger.positions));
+    damageBreakdown.triggeredEffects.forEach((effect) => {
+      lines.push(...buildTriggeredEffectLogs(effect));
+      if (effect.type === "combo" && effect.positions) {
+        lines.push(formatComboPositionText(effect.positions));
+      }
     });
-  }
-  if (damageBreakdown.habitatBonusDamage > 0) {
-    lines.push(`森の仲間たち！ +${damageBreakdown.habitatBonusDamage}`);
   }
   if (damageBreakdown.classBonusDamage > 0) {
     lines.push(`クラス効果！ +${damageBreakdown.classBonusDamage}`);
