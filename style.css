@@ -136,6 +136,38 @@ button {
   gap: 8px;
 }
 
+.action-right button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.selected-info-panel {
+  min-height: 220px;
+}
+
+.selected-info-content {
+  min-height: 170px;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 8px;
+  align-content: start;
+}
+
+.selected-info-stats {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selected-info-placeholder {
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border: 1px dashed #335a86;
+  border-radius: 8px;
+}
+
 .build-status-bar {
   min-height: 40px;
   max-height: 40px;
