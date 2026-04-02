@@ -97,6 +97,11 @@ const CONFIG = {
     HP_BONUS: 6,
     ATK_BONUS: 1
   },
+  BATTLE_SPIN: {
+    TICK_MS: 80,
+    STOP_DELAYS: [240, 460, 700],
+    RESOLVE_DELAY: 780
+  },
   REWARD: {
     BASE_COIN_OPTION: 5
   },
@@ -157,6 +162,10 @@ const INITIAL_STATE = () => ({
     compactTurnSummary: ["スピンして戦闘を開始してください。"],
     showBattleLogModal: false,
     subPhase: "idle", // idle | spinning | enemy_result | victory | defeat
+    spinningReelsStopped: [false, false, false],
+    pendingSpinFinalGrid: null,
+    pendingSpinResolution: null,
+    spinTimerIds: [],
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
     requiresOutcomeConfirm: false,
@@ -609,6 +618,76 @@ function enterBuildPhaseFromReward() {
   gameState.enemy = buildEnemyForRound(gameState.round, gameState.nextRoute);
 }
 
+function clearBattleSpinTimers() {
+  const timerIds = gameState.battle?.spinTimerIds ?? [];
+  timerIds.forEach((timerId) => {
+    clearTimeout(timerId);
+    clearInterval(timerId);
+  });
+  if (gameState.battle) {
+    gameState.battle.spinTimerIds = [];
+  }
+}
+
+function scheduleBattleSpinPresentation() {
+  clearBattleSpinTimers();
+  const timerIds = [];
+  const tickId = setInterval(() => {
+    update("battleSpinTick");
+    render();
+  }, CONFIG.BATTLE_SPIN.TICK_MS);
+  timerIds.push(tickId);
+
+  CONFIG.BATTLE_SPIN.STOP_DELAYS.forEach((delay, reelIndex) => {
+    const stopId = setTimeout(() => {
+      update("battleSpinStopReel", { reelIndex });
+      render();
+    }, delay);
+    timerIds.push(stopId);
+  });
+
+  const resolveId = setTimeout(() => {
+    update("battleResolveSpin");
+    render();
+  }, CONFIG.BATTLE_SPIN.RESOLVE_DELAY);
+  timerIds.push(resolveId);
+  gameState.battle.spinTimerIds = timerIds;
+}
+
+function applyBattleSpinResolution(result) {
+  if (!result) return;
+  const dmg = result.totalDamage ?? 0;
+  const damageBreakdown = result.damageBreakdown;
+  gameState.battle.lastDamage = damageBreakdown;
+  gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
+
+  const playerActions = result.playerActions ?? [];
+  const enemyActions = result.enemyActions ?? [];
+  const outcome = result.outcome ?? "continue";
+  gameState.battle.turnResult = { playerActions, enemyActions, totalDamage: dmg, outcome };
+  gameState.battle.logEntries.push({
+    turn: gameState.battle.turn,
+    playerActions,
+    enemyActions: enemyActions.length > 0 ? enemyActions : ["敵は力をためている"],
+    outcomeText: getBattleOutcomeText(outcome)
+  });
+  gameState.battle.compactTurnSummary = buildCompactTurnSummary({
+    playerActions,
+    enemyAttack: enemyActions[0] || "敵は力をためている",
+    outcome
+  });
+  gameState.battle.pendingOutcome = outcome;
+  gameState.battle.requiresOutcomeConfirm = outcome === "victory" || outcome === "defeat";
+  gameState.battle.subPhase = outcome === "victory" ? "victory" : outcome === "defeat" ? "defeat" : "enemy_result";
+  gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計${dmg}ダメージ`);
+  if (outcome === "victory") gameState.battle.log.push("敵を倒した。");
+  if (outcome === "defeat") gameState.battle.log.push("プレイヤーは倒れた。");
+  if (outcome === "continue") {
+    gameState.battle.subPhase = "idle";
+    gameState.battle.pendingOutcome = null;
+  }
+}
+
 function update(action, payload = {}) {
   switch (action) {
     case "setBuildManualPlacement": {
@@ -894,6 +973,7 @@ function update(action, payload = {}) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
       }
+      clearBattleSpinTimers();
       gameState.currentBattleRoute = gameState.nextRoute;
       gameState.phase = "battle";
       gameState.battle = {
@@ -908,6 +988,10 @@ function update(action, payload = {}) {
         compactTurnSummary: ["スピンして戦闘を開始してください。"],
         showBattleLogModal: false,
         subPhase: "idle",
+        spinningReelsStopped: [false, false, false],
+        pendingSpinFinalGrid: null,
+        pendingSpinResolution: null,
+        spinTimerIds: [],
         turnResult: null,
         pendingOutcome: null,
         requiresOutcomeConfirm: false,
@@ -921,51 +1005,81 @@ function update(action, payload = {}) {
       if (gameState.battle.subPhase !== "idle") return;
       gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
+      gameState.battle.spinningReelsStopped = [false, false, false];
+      const finalGrid = spinVisibleGrid(gameState.reels);
+      gameState.battle.pendingSpinFinalGrid = finalGrid;
       gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
-      const damageBreakdown = calcDamageBreakdown(gameState.battle.visibleGrid, gameState.classSlots);
+      const damageBreakdown = calcDamageBreakdown(finalGrid, gameState.classSlots);
       const dmg = damageBreakdown.totalDamage;
-      gameState.battle.lastDamage = damageBreakdown;
-      gameState.battle.enemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
       const playerActions = buildPlayerResultMessages(damageBreakdown);
       let enemyActions = [];
       let outcome = "continue";
-      if (gameState.battle.enemyHp <= 0) {
+      const projectedEnemyHp = Math.max(0, gameState.battle.enemyHp - dmg);
+      if (projectedEnemyHp <= 0) {
         outcome = "victory";
       } else {
         enemyActions = buildEnemyResultMessages(gameState.enemy.atk);
-        gameState.hp -= gameState.enemy.atk;
-        if (gameState.hp <= 0 || gameState.battle.turn >= 6) {
+        const projectedHp = gameState.hp - gameState.enemy.atk;
+        if (projectedHp <= 0 || gameState.battle.turn >= 6) {
           outcome = "defeat";
         }
       }
-
-      gameState.battle.turnResult = {
+      gameState.battle.pendingSpinResolution = {
+        damageBreakdown,
+        totalDamage: dmg,
         playerActions,
         enemyActions,
-        totalDamage: dmg,
-        outcome
+        outcome,
+        enemyAttackValue: outcome === "victory" ? 0 : gameState.enemy.atk
       };
-      gameState.battle.logEntries.push({
-        turn: gameState.battle.turn,
-        playerActions,
-        enemyActions: enemyActions.length > 0 ? enemyActions : ["敵は力をためている"],
-        outcomeText: getBattleOutcomeText(outcome)
-      });
-      gameState.battle.compactTurnSummary = buildCompactTurnSummary({
-        playerActions,
-        enemyAttack: enemyActions[0] || "敵は力をためている",
-        outcome
-      });
-      gameState.battle.pendingOutcome = outcome;
-      gameState.battle.requiresOutcomeConfirm = outcome === "victory" || outcome === "defeat";
-      gameState.battle.subPhase = outcome === "victory" ? "victory" : outcome === "defeat" ? "defeat" : "enemy_result";
-      gameState.battle.log.push(`ターン${gameState.battle.turn}: 合計${dmg}ダメージ`);
-      if (outcome === "victory") gameState.battle.log.push("敵を倒した。");
-      if (outcome === "defeat") gameState.battle.log.push("プレイヤーは倒れた。");
-      if (outcome === "continue") {
-        gameState.battle.subPhase = "idle";
-        gameState.battle.pendingOutcome = null;
+      scheduleBattleSpinPresentation();
+      return;
+    }
+    case "battleSpinTick": {
+      if (gameState.phase !== "battle") return;
+      if (gameState.battle.subPhase !== "spinning") return;
+      const rollingGrid = spinVisibleGrid(gameState.reels);
+      const stopped = gameState.battle.spinningReelsStopped ?? [false, false, false];
+      for (let col = 0; col < 3; col += 1) {
+        if (stopped[col]) continue;
+        [0, 1, 2].forEach((row) => {
+          const idx = row * 3 + col;
+          gameState.battle.visibleGrid[idx] = rollingGrid[idx];
+        });
       }
+      return;
+    }
+    case "battleSpinStopReel": {
+      if (gameState.phase !== "battle") return;
+      if (gameState.battle.subPhase !== "spinning") return;
+      const reelIndex = Number(payload.reelIndex);
+      if (reelIndex < 0 || reelIndex > 2) return;
+      const finalGrid = gameState.battle.pendingSpinFinalGrid;
+      if (!Array.isArray(finalGrid) || finalGrid.length < 9) return;
+      gameState.battle.spinningReelsStopped[reelIndex] = true;
+      [0, 1, 2].forEach((row) => {
+        const idx = row * 3 + reelIndex;
+        gameState.battle.visibleGrid[idx] = finalGrid[idx];
+      });
+      return;
+    }
+    case "battleResolveSpin": {
+      if (gameState.phase !== "battle") return;
+      if (gameState.battle.subPhase !== "spinning") return;
+      const finalGrid = gameState.battle.pendingSpinFinalGrid;
+      if (Array.isArray(finalGrid) && finalGrid.length === 9) {
+        gameState.battle.visibleGrid = [...finalGrid];
+      }
+      const resolution = gameState.battle.pendingSpinResolution;
+      if (!resolution) return;
+      if ((resolution.enemyAttackValue ?? 0) > 0) {
+        gameState.hp -= resolution.enemyAttackValue;
+      }
+      clearBattleSpinTimers();
+      gameState.battle.pendingSpinFinalGrid = null;
+      gameState.battle.pendingSpinResolution = null;
+      gameState.battle.spinningReelsStopped = [true, true, true];
+      applyBattleSpinResolution(resolution);
       return;
     }
     case "openBattleLog": {
@@ -1004,6 +1118,7 @@ function update(action, payload = {}) {
           gameState.classRerollCost = REROLL_INITIAL_COST;
         }
         gameState.round += 1;
+        clearBattleSpinTimers();
         return;
       }
 
@@ -1011,6 +1126,7 @@ function update(action, payload = {}) {
         gameState.battle.resolved = true;
         gameState.battle.won = false;
         gameState.phase = "gameover";
+        clearBattleSpinTimers();
         return;
       }
       return;
@@ -1095,6 +1211,7 @@ function update(action, payload = {}) {
       return;
     }
     case "restart": {
+      clearBattleSpinTimers();
       Object.assign(gameState, INITIAL_STATE());
       return;
     }
@@ -1831,11 +1948,14 @@ function buildCompactTurnSummary({ playerActions = [], enemyAttack, outcome }) {
 }
 
 function renderBattleGridCells() {
+  const stoppedReels = gameState.battle.spinningReelsStopped ?? [true, true, true];
   return gameState.battle.visibleGrid
-    .map((slotValue) => {
+    .map((slotValue, index) => {
       const unit = toReelUnit(slotValue);
       const m = unit ? monsterById(unit.id) : null;
-      return `<div class="slot battle-cell">${
+      const col = index % 3;
+      const reelStoppedClass = gameState.battle.subPhase === "spinning" && stoppedReels[col] ? "battle-reel-stopped" : "";
+      return `<div class="slot battle-cell ${reelStoppedClass}">${
         m
           ? `<div class="monster-chip ${m.cls} sp-${m.species}">
               ${renderHabitatBand(m, "habitat-band-chip")}
