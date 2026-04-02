@@ -42,7 +42,7 @@ const CONFIG = {
     ATK_PER_EXTRA_STAR: 1
   },
   SHOP: {
-    KEEP_LIMIT: 2
+    ROUND_LOCK_COST: 3
   },
   SCOUT: {
     DISCOUNT_DIVISOR: 2,
@@ -95,6 +95,7 @@ const INITIAL_STATE = () => ({
   currentBattleRoute: null,
   pendingRewardType: null, // normal | charisma | null
   pendingRewardRouteId: null,
+  selectedRewardType: null, // monster | coins | null
   normalRewardChoices: [],
   defeatedEnemyChoices: [],
   reels: Array(18).fill(null),
@@ -195,7 +196,7 @@ function cleanupAfterBuildAction({ clearSelection = true } = {}) {
 
 function clearPendingPlacementState({ rerollPurchasedSlot = false } = {}) {
   if (rerollPurchasedSlot && gameState.pendingPurchaseSlotIndex !== null) {
-    gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
+    gameState.shopChoices = rerollShopEntriesWithLocks(gameState.shopChoices, gameState.pendingPurchaseSlotIndex);
   }
   gameState.pendingPlacement = null;
   gameState.pendingPurchaseSlotIndex = null;
@@ -227,6 +228,7 @@ function completeNormalReward() {
   gameState.pendingPlacement = null;
   gameState.pendingPurchaseSlotIndex = null;
   gameState.pendingRewardRouteId = null;
+  gameState.selectedRewardType = null;
   gameState.normalRewardChoices = [];
   gameState.pendingRewardType = null;
   gameState.phase = "route";
@@ -346,10 +348,10 @@ function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
   const entries = [];
   for (let i = 0; i < choiceCount; i += 1) {
     const preset = baseEntries[i] ?? null;
-    if (preset && preset.kept) {
+    if (preset && preset.roundLocked) {
       entries.push({
         monsterId: preset.monsterId,
-        kept: true,
+        roundLocked: true,
         scout: Boolean(preset.scout),
         costOverride: preset.costOverride ?? null
       });
@@ -357,34 +359,35 @@ function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
     }
     const excluded = entries.map((entry) => entry.monsterId);
     const monsterId = pickMonsterId(pool, excluded);
-    entries.push({ monsterId, kept: false, scout: false, costOverride: null });
+    entries.push({ monsterId, roundLocked: false, scout: false, costOverride: null });
   }
   return entries;
 }
 
-function rerollShopEntriesWithKept(entries, replacedSlotIndex = null) {
+function rerollShopEntriesWithLocks(entries, replacedSlotIndex = null) {
   const next = entries.map((entry) => ({ ...entry }));
   const placedIds = [];
   for (let i = 0; i < next.length; i += 1) {
     if (i === replacedSlotIndex) {
       const monsterId = pickMonsterId(MONSTERS, placedIds);
-      next[i] = { monsterId, kept: false, scout: false, costOverride: null };
+      next[i] = { monsterId, roundLocked: false, scout: false, costOverride: null };
       placedIds.push(monsterId);
       continue;
     }
-    if (next[i].kept) {
+    if (next[i].roundLocked) {
       placedIds.push(next[i].monsterId);
       continue;
     }
     const monsterId = pickMonsterId(MONSTERS, placedIds);
-    next[i] = { monsterId, kept: false, scout: false, costOverride: null };
+    next[i] = { monsterId, roundLocked: false, scout: false, costOverride: null };
     placedIds.push(monsterId);
   }
   return next;
 }
 
 function refreshShopEntriesForNextBuild(entries) {
-  return rerollShopEntriesWithKept(entries, null);
+  const unlockedEntries = entries.map((entry) => ({ ...entry, roundLocked: false }));
+  return rerollShopEntriesWithLocks(unlockedEntries, null);
 }
 
 function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
@@ -486,6 +489,7 @@ function enterBuildPhaseFromReward() {
   gameState.defeatedEnemyChoices = [];
   gameState.normalRewardChoices = [];
   gameState.pendingRewardRouteId = null;
+  gameState.selectedRewardType = null;
   gameState.monsterRerollCost = REROLL_INITIAL_COST;
   gameState.enemy = buildEnemyForRound(gameState.round, gameState.nextRoute);
 }
@@ -586,20 +590,26 @@ function update(action, payload = {}) {
       gameState.coins -= purchaseCost;
       gameState.reels[emptyIndex] = createUnit(monster.id, 1);
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
-      gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, slotIndex);
+      gameState.shopChoices = rerollShopEntriesWithLocks(gameState.shopChoices, slotIndex);
       return;
     }
-    case "toggleShopKeep": {
+    case "roundLockShopEntry": {
       if (gameState.phase !== "build") return;
       const slotIndex = Number(payload.slotIndex);
       if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
       const entry = gameState.shopChoices[slotIndex];
-      const keptCount = gameState.shopChoices.filter((item) => item.kept).length;
-      if (!entry.kept && keptCount >= CONFIG.SHOP.KEEP_LIMIT) {
-        gameState.buildStatus = { type: "warn", text: `キープ上限は${CONFIG.SHOP.KEEP_LIMIT}件です` };
+      if (!entry) return;
+      if (entry.roundLocked) {
+        gameState.buildStatus = { type: "warn", text: "この枠はすでに次戦まで固定済みです" };
         return;
       }
-      gameState.shopChoices[slotIndex] = { ...entry, kept: !entry.kept };
+      if (gameState.coins < CONFIG.SHOP.ROUND_LOCK_COST) {
+        gameState.buildStatus = { type: "warn", text: "固定に必要なコインが不足しています" };
+        return;
+      }
+      gameState.coins -= CONFIG.SHOP.ROUND_LOCK_COST;
+      gameState.shopChoices[slotIndex] = { ...entry, roundLocked: true };
+      gameState.buildStatus = { type: "info", text: `この枠を次戦まで固定しました（-${CONFIG.SHOP.ROUND_LOCK_COST}コイン）` };
       return;
     }
     case "rerollShop": {
@@ -609,7 +619,7 @@ function update(action, payload = {}) {
         return;
       }
       gameState.coins -= gameState.monsterRerollCost;
-      gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices);
+      gameState.shopChoices = rerollShopEntriesWithLocks(gameState.shopChoices);
       gameState.buildStatus = { type: "info", text: `ショップをリロールしました（-${gameState.monsterRerollCost}コイン）` };
       gameState.monsterRerollCost += 1;
       return;
@@ -865,6 +875,7 @@ function update(action, payload = {}) {
         gameState.coins += 8 + (gameState.currentBattleRoute?.nextWinBonusCoins ?? 0);
         gameState.pendingRewardType = rewardType;
         gameState.pendingRewardRouteId = gameState.currentBattleRoute?.id ?? gameState.nextRoute.id;
+        gameState.selectedRewardType = null;
         gameState.defeatedEnemyChoices = [...(gameState.enemy.monsterIds ?? [])];
         if (rewardType === "normal") {
           const rewardRoute = getRouteById(gameState.pendingRewardRouteId);
@@ -918,13 +929,28 @@ function update(action, payload = {}) {
       if (!selectedMonster) return;
       if (!gameState.normalRewardChoices.includes(selectedMonster.id)) return;
       gameState.pendingPlacement = createUnit(selectedMonster.id, 1);
+      gameState.selectedRewardType = "monster";
       cleanupAfterBuildAction();
-      gameState.buildStatus = { type: "info", text: `${selectedMonster.name} を報酬として獲得。配置先を選択してください` };
+      gameState.buildStatus = { type: "info", text: `${selectedMonster.name} ☆ をリールに配置してください` };
+      return;
+    }
+    case "selectNormalRewardCoins": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "normal") return;
+      if (gameState.pendingPlacement) {
+        gameState.buildStatus = { type: "warn", text: "配置待ちの報酬モンスターを先に配置してください" };
+        return;
+      }
+      gameState.selectedRewardType = "coins";
+      const rewardRoute = getRouteById(gameState.pendingRewardRouteId);
+      const coins = CONFIG.REWARD.BASE_COIN_OPTION + (rewardRoute.rewardCoinBonus ?? 0);
+      gameState.buildStatus = { type: "info", text: `+${coins} coins will be gained` };
       return;
     }
     case "takeNormalRewardCoins": {
       if (gameState.phase !== "reward") return;
       if (gameState.pendingRewardType !== "normal") return;
+      if (gameState.selectedRewardType !== "coins") return;
       if (gameState.pendingPlacement) {
         gameState.buildStatus = { type: "warn", text: "配置待ちの報酬モンスターを先に配置してください" };
         return;
@@ -1238,6 +1264,30 @@ function renderHabitatBand(monster, className = "habitat-panel") {
   return `<div class="${className}" style="${buildHabitatPanelStyle(monster)}"></div>`;
 }
 
+function renderMonsterCard(monster, options = {}) {
+  if (!monster) return "";
+  const {
+    star = 1,
+    isSelected = false,
+    containerClass = "",
+    dataAct = null,
+    dataAttrs = "",
+    actionHtml = "",
+    extraInfoHtml = ""
+  } = options;
+  const selectedClass = isSelected ? "build-selected-shop" : "";
+  const clickableAttrs = dataAct ? `data-act="${dataAct}" ${dataAttrs}` : "";
+  return `
+    <article class="card ${monster.cls} ${containerClass} ${selectedClass}" ${clickableAttrs}>
+      ${renderHabitatBand(monster, "habitat-panel")}
+      <h4>${getMonsterNameWithStars(monster.name, star)}</h4>
+      <div class="stats">HP ${monster.hp} / ダメージ ${monster.atk}</div>
+      ${extraInfoHtml}
+      ${actionHtml ? `<div class="card-controls">${actionHtml}</div>` : ""}
+    </article>
+  `;
+}
+
 function render() {
   switch (gameState.phase) {
     case "build":
@@ -1378,19 +1428,18 @@ function renderBuildPhase() {
             </div>
             <div class="shop-grid">
               ${visibleShopEntries.map(
-                (entry) => `
-                <article class="card ${entry.monster.cls} ${entry.kept ? "shop-kept" : ""} ${
-                  gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id ? "build-selected-shop" : ""
-                }" data-act="select-shop" data-mid="${entry.monster.id}" data-slot-index="${entry.index}">
-                  ${renderHabitatBand(entry.monster, "habitat-panel")}
-                  <h4>${getMonsterNameWithStars(entry.monster.name, 1)}</h4>
-                  <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
-                  ${entry.scout ? `<p class="muted">スカウト割引: 💰${entry.displayCost}</p>` : ""}
-                  <div class="card-controls">
+                (entry) => renderMonsterCard(entry.monster, {
+                  star: 1,
+                  isSelected: gameState.selectedSource === "shop" && gameState.selectedMonsterId === entry.monster.id,
+                  containerClass: entry.roundLocked ? "shop-locked" : "",
+                  dataAct: "select-shop",
+                  dataAttrs: `data-mid="${entry.monster.id}" data-slot-index="${entry.index}"`,
+                  extraInfoHtml: entry.scout ? `<p class="muted">スカウト割引: 💰${entry.displayCost}</p>` : "",
+                  actionHtml: `
                     <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.displayCost}</button>
-                    <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
-                  </div>
-                </article>`
+                    <button class="small ${entry.roundLocked ? "btn-primary" : "btn-secondary"}" data-act="round-lock" data-slot-index="${entry.index}" ${entry.roundLocked ? "disabled" : ""}>${entry.roundLocked ? "次戦まで固定済み" : `次戦まで固定 💰${CONFIG.SHOP.ROUND_LOCK_COST}`}</button>
+                  `
+                })
               ).join("")}
             </div>
             ${
@@ -1553,15 +1602,15 @@ function bindBuildEvents() {
 
   app.querySelectorAll("[data-act='select-shop']").forEach((card) => {
     card.addEventListener("click", (event) => {
-      if (event.target?.closest("[data-act='buy']") || event.target?.closest("[data-act='toggle-keep']")) return;
+      if (event.target?.closest("[data-act='buy']") || event.target?.closest("[data-act='round-lock']")) return;
       update("selectShopMonster", { monsterId: card.dataset.mid });
       render();
     });
   });
 
-  app.querySelectorAll("[data-act='toggle-keep']").forEach((btn) => {
+  app.querySelectorAll("[data-act='round-lock']").forEach((btn) => {
     btn.addEventListener("click", () => {
-      update("toggleShopKeep", { slotIndex: Number(btn.dataset.slotIndex) });
+      update("roundLockShopEntry", { slotIndex: Number(btn.dataset.slotIndex) });
       render();
     });
   });
@@ -1850,7 +1899,7 @@ function renderRewardPhase() {
     const mode = getBuildInteractionMode();
     const statusForReward =
       mode === "idle"
-        ? { type: "info", text: "報酬を選択してください: モンスターを受け取るか、+5コインを獲得できます" }
+        ? { type: "info", text: "報酬を1つ選択してください" }
         : rewardStatus;
     app.innerHTML = `
       <div class="center-phase">
@@ -1862,28 +1911,29 @@ function renderRewardPhase() {
           </div>
         </div>
         <section class="panel">
-          <h3>報酬を1つ選択してください</h3>
-          <p class="muted">敵モンスターを選んだ場合は、この画面で即時配置します。配置せずにコイン報酬を選ぶこともできます。</p>
-          <p class="muted">今回ルート効果（${rewardRoute.label}）: 候補数 +${rewardRoute.rewardCandidateBonus ?? 0} / コイン報酬 +${rewardRoute.rewardCoinBonus ?? 0}</p>
-          <div class="choices">
-            ${rewardChoices.map((m) => `
-              <article class="choice">
-                <h4>${m.name}</h4>
-                <p class="muted">種族: ${m.species} / 生息地: ${getMonsterHabitats(m).join("/") || "-"}</p>
-                <p class="muted">報酬ユニット（☆1）</p>
-                <button class="btn-secondary" data-act="pick-normal-reward-monster" data-mid="${m.id}" ${gameState.pendingPlacement ? "disabled" : ""}>このモンスターを受け取る</button>
-              </article>
-            `).join("")}
-            <article class="choice">
-              <h4>コインを受け取る</h4>
-              <p class="muted">モンスター報酬を見送り、追加コインを獲得します。</p>
-              <button class="btn-secondary" data-act="take-normal-reward-coins" ${gameState.pendingPlacement ? "disabled" : ""}>+${coinRewardValue}コインを受け取る</button>
+          <div class="shop-grid">
+            ${rewardChoices.map((monster) => renderMonsterCard(monster, {
+              star: 1,
+              isSelected: gameState.selectedRewardType === "monster" && toReelUnit(gameState.pendingPlacement)?.id === monster.id,
+              dataAct: "pick-normal-reward-monster",
+              dataAttrs: `data-mid="${monster.id}"`
+            })).join("")}
+            <article class="card reward-coin-card ${gameState.selectedRewardType === "coins" ? "build-selected-shop" : ""}" data-act="select-normal-reward-coins">
+              <h4>コイン報酬</h4>
+              <div class="stats">+${coinRewardValue} coins</div>
             </article>
           </div>
 
           <div class="build-status-bar build-status-${statusForReward.type}" style="margin-top:12px;" title="${statusForReward.text}">
             <span>${statusForReward.text}</span>
           </div>
+          ${
+            gameState.selectedRewardType === "coins"
+              ? `<div style="display:flex;justify-content:flex-end;margin-top:8px;">
+                  <button class="small btn-secondary" data-act="take-normal-reward-coins">コインを受け取る</button>
+                </div>`
+              : ""
+          }
 
           <h3 style="margin-top:14px;">報酬配置用リール</h3>
           <div class="reel-grid">
@@ -1950,6 +2000,10 @@ function renderRewardPhase() {
         update("pickNormalRewardMonster", { monsterId: btn.dataset.mid });
         render();
       });
+    });
+    app.querySelector("[data-act='select-normal-reward-coins']")?.addEventListener("click", () => {
+      update("selectNormalRewardCoins");
+      render();
     });
     app.querySelector("[data-act='take-normal-reward-coins']")?.addEventListener("click", () => {
       update("takeNormalRewardCoins");
