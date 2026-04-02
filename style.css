@@ -129,6 +129,13 @@ button {
   margin-bottom: 8px;
 }
 
+.action-left,
+.action-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .build-status-bar {
   min-height: 40px;
   max-height: 40px;
@@ -222,8 +229,9 @@ button {
 }
 
 .build-selected-slot {
-  outline: 2px solid #7bc1ff;
-  background: rgba(77, 139, 214, 0.2);
+  outline: 3px solid #ffd166;
+  box-shadow: 0 0 8px rgba(255, 209, 102, 0.6);
+  background: rgba(255, 209, 102, 0.14);
 }
 
 .monster-chip {
