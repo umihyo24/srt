@@ -1012,11 +1012,22 @@ function renderBuildPhase() {
         <div class="phase-root">
           <section class="panel">
             <div class="shop-action-row">
-              <label style="display:flex;gap:8px;align-items:center;">
-                <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
-                配置先を選ぶ
-              </label>
-              <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
+              <div class="action-left">
+                <label style="display:flex;gap:8px;align-items:center;">
+                  <input type="checkbox" data-act="toggle-manual" ${gameState.buildManualPlacement ? "checked" : ""} />
+                  手動配置
+                </label>
+                <button class="small btn-secondary" data-act="reroll-shop">リロール 💰${gameState.monsterRerollCost}</button>
+              </div>
+              ${
+                gameState.selectedSource === "reel"
+                  ? `<div class="action-right">
+                      <button class="small btn-secondary" data-act="clear-selected">解除</button>
+                      <button class="small btn-secondary" data-act="toggle-merge-mode">重ねる</button>
+                      ${canSell ? '<button class="small btn-danger" data-act="sell-selected">売却</button>' : ""}
+                    </div>`
+                  : ""
+              }
             </div>
             <div class="shop-grid">
               ${visibleShopEntries.map(
@@ -1111,22 +1122,7 @@ function renderBuildPhase() {
                     <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
                     <p>コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
                     ${isReelSelection ? `<p>売却価格: ${sellValue}</p>` : ""}
-                    ${isReelSelection ? `<p>マージモード: ${gameState.mergeMode ? "ON" : "OFF"}</p>` : ""}
-                    ${
-                      isReelSelection
-                        ? '<button class="small btn-secondary" data-act="clear-selected">選択解除</button>'
-                        : ""
-                    }
-                    ${
-                      isReelSelection
-                        ? '<button class="small btn-secondary" data-act="toggle-merge-mode">マージモード切替</button>'
-                        : ""
-                    }
-                    ${
-                      canSell
-                        ? '<button class="small btn-danger" data-act="sell-selected">売却</button>'
-                        : ""
-                    }`
+                    ${isReelSelection ? `<p>マージモード: ${gameState.mergeMode ? "ON" : "OFF"}</p>` : ""}`
                   : "<p class=\"muted\">未選択</p>"
             }
           </section>
