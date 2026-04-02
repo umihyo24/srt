@@ -21,8 +21,39 @@ const CLASS_CHOICES = [
 ];
 
 const ROUTE_CHOICES = [
-  { id: "normal", label: "通常ルート", enemyHpBonus: 0, enemyAtkBonus: 0, nextWinBonusCoins: 0, rewardCandidateBonus: 0, rewardCoinBonus: 1 },
-  { id: "strong", label: "強敵ルート", enemyHpBonus: 4, enemyAtkBonus: 1, nextWinBonusCoins: 4, rewardCandidateBonus: 1, rewardCoinBonus: 0 }
+  {
+    id: "forest",
+    label: "森林ルート",
+    shortDesc: "安定・安全寄り",
+    difficulty: 1,
+    enemyHpBonus: 0,
+    enemyAtkBonus: 0,
+    nextWinBonusCoins: 0,
+    rewardCandidateBonus: 0,
+    rewardCoinBonus: 1
+  },
+  {
+    id: "cave",
+    label: "洞窟ルート",
+    shortDesc: "標準的な危険度",
+    difficulty: 2,
+    enemyHpBonus: 2,
+    enemyAtkBonus: 1,
+    nextWinBonusCoins: 2,
+    rewardCandidateBonus: 0,
+    rewardCoinBonus: 0
+  },
+  {
+    id: "volcano",
+    label: "火山ルート",
+    shortDesc: "高難度・高報酬",
+    difficulty: 3,
+    enemyHpBonus: 4,
+    enemyAtkBonus: 1,
+    nextWinBonusCoins: 4,
+    rewardCandidateBonus: 1,
+    rewardCoinBonus: 0
+  }
 ];
 
 const CONFIG = {
@@ -403,13 +434,58 @@ function getRouteById(routeId) {
   return ROUTE_CHOICES.find((route) => route.id === routeId) || ROUTE_CHOICES[0];
 }
 
+function getRoutesByDifficulty() {
+  return [...ROUTE_CHOICES].sort((a, b) => (a.difficulty ?? 999) - (b.difficulty ?? 999));
+}
+
+function getRouteDangerClass(route) {
+  const difficulty = route?.difficulty ?? 1;
+  if (difficulty <= 1) return "route-easy";
+  if (difficulty >= 3) return "route-hard";
+  return "route-mid";
+}
+
+function estimateIncomingDamageRange(enemy, route) {
+  const enemyAtk = enemy?.atk ?? 0;
+  const difficulty = route?.difficulty ?? 1;
+  const minHits = difficulty >= 3 ? 2 : 1;
+  const maxHits = difficulty >= 2 ? 3 : 2;
+  return {
+    min: enemyAtk * minHits,
+    max: enemyAtk * maxHits
+  };
+}
+
+function getSpawnFocusText(monsterIds = []) {
+  const speciesCounts = {};
+  monsterIds.forEach((id) => {
+    const monster = monsterById(id);
+    if (!monster) return;
+    speciesCounts[monster.species] = (speciesCounts[monster.species] ?? 0) + 1;
+  });
+  const labels = Object.entries(speciesCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([species]) => {
+      if (species === "reptile") return "🐍 リザード系";
+      if (species === "undead") return "🧟 アンデッド系";
+      if (species === "beast") return "🐺 ビースト系";
+      if (species === "humanoid") return "🛡 ヒューマノイド系";
+      if (species === "demon") return "🔥 デーモン系";
+      if (species === "plant") return "🍄 植物系";
+      return `✨ ${species}`;
+    });
+  if (labels.length === 0) return "不明";
+  return labels.join(" / ");
+}
+
 function isBossRound(round) {
   return round % CONFIG.BOSS.ROUND_INTERVAL === 0;
 }
 
 function buildEnemyMonsterIds(round, routeId, count = CHOICE_COUNT) {
   const ids = MONSTERS.map((m) => m.id);
-  const routeSeed = String(routeId || "normal").split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const routeSeed = String(routeId || "forest").split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   const start = (round * 17 + routeSeed) % ids.length;
   const picks = [];
   for (let i = 0; i < ids.length && picks.length < count; i += 1) {
@@ -2109,34 +2185,35 @@ function renderRewardPhase() {
 }
 
 function renderRoutePhase() {
-  const defeatedPreview = buildScoutRewardChoices(gameState.defeatedEnemyChoices);
+  const orderedRoutes = getRoutesByDifficulty();
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
         <h2>ルート選択（次の戦闘条件）</h2>
-        <div class="badge">ラウンド ${gameState.round}</div>
+        <div class="badges">
+          <div class="badge">ラウンド ${gameState.round}</div>
+          <div class="badge">現在HP ${gameState.hp}</div>
+        </div>
       </div>
       <section class="panel">
-        ${
-          defeatedPreview.length > 0
-            ? `<p class="muted">前戦闘で倒した敵: ${defeatedPreview.map((m) => m.name).join(" / ")}</p>`
-            : ""
-        }
-        <h3>次に進むルートを選択してください</h3>
+        <h3>左ほど安全、右ほど高リスクです</h3>
         <div class="choices">
-          ${ROUTE_CHOICES.map(
+          ${orderedRoutes.map(
             (route) => {
               const previewEnemy = buildEnemyForRound(gameState.round, route);
-              const previewNames = buildScoutRewardChoices(previewEnemy.monsterIds).map((m) => m.name).join(" / ");
+              const incomingRange = estimateIncomingDamageRange(previewEnemy, route);
+              const dangerClass = getRouteDangerClass(route);
+              const spawnFocus = getSpawnFocusText(previewEnemy.monsterIds);
+              const rewardSummary = route.nextWinBonusCoins > 0 || route.rewardCandidateBonus > 0
+                ? "勝利報酬が厚い"
+                : "経済的に安定";
               return `
-            <article class="choice">
+            <article class="choice ${dangerClass}">
               <h4>${route.label}${previewEnemy.isBoss ? "（ボス戦）" : ""}</h4>
-              <p class="muted">敵HP補正 +${route.enemyHpBonus}</p>
-              <p class="muted">敵攻撃補正 +${route.enemyAtkBonus}</p>
-              <p class="muted">次回勝利ボーナス +${route.nextWinBonusCoins}コイン</p>
-              <p class="muted">通常報酬候補 +${route.rewardCandidateBonus ?? 0}</p>
-              <p class="muted">通常報酬コイン +${route.rewardCoinBonus ?? 0}</p>
-              <p class="muted">出現候補: ${previewNames || "不明"}</p>
+              <p class="muted">${route.shortDesc}</p>
+              <p class="muted">予想被ダメージ: ${incomingRange.min}〜${incomingRange.max}${incomingRange.max >= Math.max(6, gameState.hp - 1) ? " ⚠" : ""}</p>
+              <p class="muted">特徴: ${route.enemyHpBonus + route.enemyAtkBonus > 0 ? "敵が強い" : "敵は標準"} / ${rewardSummary}</p>
+              <p class="muted">出現傾向: ${spawnFocus}</p>
               <button class="btn-secondary" data-act="pick-route" data-rid="${route.id}">このルートに進む</button>
             </article>`;
             }
