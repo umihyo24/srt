@@ -36,6 +36,18 @@ const CONFIG = {
     MAX_STAR: 3,
     ATK_PER_EXTRA_STAR: 1
   },
+  SHOP: {
+    KEEP_LIMIT: 2
+  },
+  SCOUT: {
+    DISCOUNT_DIVISOR: 2,
+    MIN_COST: 1
+  },
+  BOSS: {
+    ROUND_INTERVAL: 3,
+    HP_BONUS: 6,
+    ATK_BONUS: 1
+  },
   HABITAT_COLORS: {
     forest: "#3ea85a",
     water: "#3f8bff",
@@ -69,6 +81,9 @@ const INITIAL_STATE = () => ({
   classRerollCost: 4,
   nextRoute: ROUTE_CHOICES[0],
   currentBattleRoute: null,
+  pendingRewardType: null, // scout | charisma | null
+  defeatedEnemyChoices: [],
+  scoutQueue: [],
   reels: Array(18).fill(null),
   enemy: { ...buildEnemyForRound(1, ROUTE_CHOICES[0]) },
   battle: {
@@ -235,12 +250,17 @@ function rollShopEntries(pool, choiceCount = SHOP_SIZE, baseEntries = []) {
   for (let i = 0; i < choiceCount; i += 1) {
     const preset = baseEntries[i] ?? null;
     if (preset && preset.kept) {
-      entries.push({ monsterId: preset.monsterId, kept: true });
+      entries.push({
+        monsterId: preset.monsterId,
+        kept: true,
+        scout: Boolean(preset.scout),
+        costOverride: preset.costOverride ?? null
+      });
       continue;
     }
     const excluded = entries.map((entry) => entry.monsterId);
     const monsterId = pickMonsterId(pool, excluded);
-    entries.push({ monsterId, kept: false });
+    entries.push({ monsterId, kept: false, scout: false, costOverride: null });
   }
   return entries;
 }
@@ -251,7 +271,7 @@ function rerollShopEntriesWithKept(entries, replacedSlotIndex = null) {
   for (let i = 0; i < next.length; i += 1) {
     if (i === replacedSlotIndex) {
       const monsterId = pickMonsterId(MONSTERS, placedIds);
-      next[i] = { monsterId, kept: false };
+      next[i] = { monsterId, kept: false, scout: false, costOverride: null };
       placedIds.push(monsterId);
       continue;
     }
@@ -260,14 +280,14 @@ function rerollShopEntriesWithKept(entries, replacedSlotIndex = null) {
       continue;
     }
     const monsterId = pickMonsterId(MONSTERS, placedIds);
-    next[i] = { monsterId, kept: false };
+    next[i] = { monsterId, kept: false, scout: false, costOverride: null };
     placedIds.push(monsterId);
   }
   return next;
 }
 
 function refreshShopEntriesForNextBuild(entries) {
-  return rerollShopEntriesWithKept(entries, null);
+  return consumeScoutQueueIntoShop(rerollShopEntriesWithKept(entries, null));
 }
 
 function rollClassChoices(pool, choiceCount = CHOICE_COUNT) {
@@ -283,12 +303,74 @@ function getRouteById(routeId) {
   return ROUTE_CHOICES.find((route) => route.id === routeId) || ROUTE_CHOICES[0];
 }
 
+function isBossRound(round) {
+  return round % CONFIG.BOSS.ROUND_INTERVAL === 0;
+}
+
+function getDiscountedScoutCost(monster) {
+  if (!monster) return CONFIG.SCOUT.MIN_COST;
+  return Math.max(CONFIG.SCOUT.MIN_COST, Math.floor(monster.cost / CONFIG.SCOUT.DISCOUNT_DIVISOR));
+}
+
+function buildEnemyMonsterIds(round, routeId, count = CHOICE_COUNT) {
+  const ids = MONSTERS.map((m) => m.id);
+  const routeSeed = String(routeId || "normal").split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const start = (round * 17 + routeSeed) % ids.length;
+  const picks = [];
+  for (let i = 0; i < ids.length && picks.length < count; i += 1) {
+    const idx = (start + i * 3) % ids.length;
+    const id = ids[idx];
+    if (!picks.includes(id)) picks.push(id);
+  }
+  return picks;
+}
+
+function buildScoutRewardChoices(monsterIds = []) {
+  return monsterIds.map((id) => monsterById(id)).filter(Boolean).slice(0, CHOICE_COUNT);
+}
+
+function addScoutToQueue(monsterId) {
+  if (!monsterId) return;
+  gameState.scoutQueue = [monsterId];
+}
+
+function consumeScoutQueueIntoShop(entries = []) {
+  const nextEntries = entries.map((entry) => ({ ...entry }));
+  if (gameState.scoutQueue.length === 0) return nextEntries;
+  const queuedIds = [...gameState.scoutQueue];
+  gameState.scoutQueue = [];
+  queuedIds.forEach((monsterId) => {
+    const monster = monsterById(monsterId);
+    if (!monster) return;
+    const insertIndex = nextEntries.findIndex((entry) => !entry.kept);
+    if (insertIndex === -1) return;
+    nextEntries[insertIndex] = {
+      monsterId: monster.id,
+      kept: false,
+      scout: true,
+      costOverride: getDiscountedScoutCost(monster)
+    };
+  });
+  return nextEntries;
+}
+
+function getShopEntryCost(entry, monster) {
+  if (entry?.costOverride != null) return entry.costOverride;
+  return monster?.cost ?? 0;
+}
+
 function buildEnemyForRound(round, route) {
   const safeRoute = route || ROUTE_CHOICES[0];
+  const bossRound = isBossRound(round);
+  const bossHpBonus = bossRound ? CONFIG.BOSS.HP_BONUS : 0;
+  const bossAtkBonus = bossRound ? CONFIG.BOSS.ATK_BONUS : 0;
+  const monsterIds = buildEnemyMonsterIds(round, safeRoute.id, CHOICE_COUNT);
   return {
-    name: `ラウンド${round}の敵`,
-    hp: 10 + round * 2 + safeRoute.enemyHpBonus,
-    atk: 2 + Math.floor(round / 2) + safeRoute.enemyAtkBonus
+    name: bossRound ? `ラウンド${round} ボス` : `ラウンド${round}の敵`,
+    isBoss: bossRound,
+    monsterIds,
+    hp: 10 + round * 2 + safeRoute.enemyHpBonus + bossHpBonus,
+    atk: 2 + Math.floor(round / 2) + safeRoute.enemyAtkBonus + bossAtkBonus
   };
 }
 
@@ -320,6 +402,7 @@ function enterBuildPhaseFromReward() {
   gameState.phase = "build";
   resetBuildUiState();
   gameState.shopChoices = refreshShopEntriesForNextBuild(gameState.shopChoices);
+  gameState.defeatedEnemyChoices = [];
   gameState.monsterRerollCost = REROLL_INITIAL_COST;
   gameState.enemy = buildEnemyForRound(gameState.round, gameState.nextRoute);
 }
@@ -376,6 +459,7 @@ function update(action, payload = {}) {
       if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
       const entry = gameState.shopChoices[slotIndex];
       const monster = MONSTERS.find((m) => m.id === entry?.monsterId);
+      const purchaseCost = getShopEntryCost(entry, monster);
       if (!monster || gameState.phase !== "build") return;
       if (payload.monsterId && payload.monsterId !== monster.id) return;
       gameState.selectedMonsterId = monster.id;
@@ -386,19 +470,19 @@ function update(action, payload = {}) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
       }
-      if (gameState.coins < monster.cost) {
+      if (gameState.coins < purchaseCost) {
         gameState.buildStatus = {
           type: "warn",
           text: "コインが不足しています",
           code: "insufficient_coins",
-          requiredCoins: monster.cost
+          requiredCoins: purchaseCost
         };
         return;
       }
       gameState.selectedMonsterId = monster.id;
       gameState.selectedMonsterStar = 1;
       if (gameState.buildManualPlacement) {
-        gameState.coins -= monster.cost;
+        gameState.coins -= purchaseCost;
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
         gameState.replacementConfirm = null;
@@ -409,7 +493,7 @@ function update(action, payload = {}) {
 
       const emptyIndex = getFirstEmptyVisualSlotIndex(gameState.reels);
       if (emptyIndex === -1) {
-        gameState.coins -= monster.cost;
+        gameState.coins -= purchaseCost;
         gameState.pendingPlacement = createUnit(monster.id, 1);
         gameState.pendingPurchaseSlotIndex = slotIndex;
         gameState.replacementConfirm = null;
@@ -418,7 +502,7 @@ function update(action, payload = {}) {
         return;
       }
 
-      gameState.coins -= monster.cost;
+      gameState.coins -= purchaseCost;
       gameState.reels[emptyIndex] = createUnit(monster.id, 1);
       gameState.buildStatus = { type: "info", text: `${monster.name}を自動配置しました` };
       gameState.shopChoices = rerollShopEntriesWithKept(gameState.shopChoices, slotIndex);
@@ -429,6 +513,11 @@ function update(action, payload = {}) {
       const slotIndex = Number(payload.slotIndex);
       if (slotIndex < 0 || slotIndex >= gameState.shopChoices.length) return;
       const entry = gameState.shopChoices[slotIndex];
+      const keptCount = gameState.shopChoices.filter((item) => item.kept).length;
+      if (!entry.kept && keptCount >= CONFIG.SHOP.KEEP_LIMIT) {
+        gameState.buildStatus = { type: "warn", text: `キープ上限は${CONFIG.SHOP.KEEP_LIMIT}件です` };
+        return;
+      }
       gameState.shopChoices[slotIndex] = { ...entry, kept: !entry.kept };
       return;
     }
@@ -700,13 +789,19 @@ function update(action, payload = {}) {
       if (gameState.phase !== "battle") return;
       if (!gameState.battle.requiresOutcomeConfirm) return;
       if (gameState.battle.pendingOutcome === "victory") {
+        const victoryRound = gameState.round;
+        const rewardType = isBossRound(victoryRound) ? "charisma" : "scout";
         gameState.battle.resolved = true;
         gameState.battle.won = true;
         gameState.phase = "reward";
         gameState.coins += 8 + (gameState.currentBattleRoute?.nextWinBonusCoins ?? 0);
+        gameState.pendingRewardType = rewardType;
+        gameState.defeatedEnemyChoices = [...(gameState.enemy.monsterIds ?? [])];
         gameState.currentBattleRoute = null;
-        gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
-        gameState.classRerollCost = REROLL_INITIAL_COST;
+        if (rewardType === "charisma") {
+          gameState.classChoices = rollClassChoices(CLASS_CHOICES, CHOICE_COUNT);
+          gameState.classRerollCost = REROLL_INITIAL_COST;
+        }
         gameState.round += 1;
         return;
       }
@@ -721,6 +816,7 @@ function update(action, payload = {}) {
     }
     case "pickClass": {
       if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "charisma") return;
       const picked = CLASS_CHOICES.find((c) => c.id === payload.classId);
       if (!picked) return;
       if (!gameState.classChoices.includes(picked.id)) return;
@@ -735,17 +831,35 @@ function update(action, payload = {}) {
     }
     case "skipClassSelection": {
       if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "charisma") return;
+      gameState.phase = "route";
+      return;
+    }
+    case "pickScoutReward": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "scout") return;
+      const selectedMonster = monsterById(payload.monsterId);
+      if (!selectedMonster) return;
+      addScoutToQueue(selectedMonster.id);
+      gameState.phase = "route";
+      return;
+    }
+    case "skipScoutReward": {
+      if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "scout") return;
       gameState.phase = "route";
       return;
     }
     case "pickRoute": {
       if (gameState.phase !== "route") return;
       gameState.nextRoute = getRouteById(payload.routeId);
+      gameState.pendingRewardType = null;
       enterBuildPhaseFromReward();
       return;
     }
     case "rerollClassChoices": {
       if (gameState.phase !== "reward") return;
+      if (gameState.pendingRewardType !== "charisma") return;
       if (gameState.coins < gameState.classRerollCost) {
         alert("リロールに必要なコインが不足しています。");
         return;
@@ -1025,7 +1139,10 @@ function getCurrentClassInfo(classSlots = []) {
 
 function renderBuildPhase() {
   const visibleShopEntries = gameState.shopChoices
-    .map((entry, index) => ({ ...entry, index, monster: monsterById(entry.monsterId) }))
+    .map((entry, index) => {
+      const monster = monsterById(entry.monsterId);
+      return { ...entry, index, monster, displayCost: getShopEntryCost(entry, monster) };
+    })
     .filter((entry) => entry.monster);
   const classInfo = getCurrentClassInfo(gameState.classSlots);
   const selected = monsterById(gameState.selectedMonsterId);
@@ -1080,8 +1197,9 @@ function renderBuildPhase() {
                   ${renderHabitatBand(entry.monster, "habitat-panel")}
                   <h4>${getMonsterNameWithStars(entry.monster.name, 1)}</h4>
                   <div class="stats">HP ${entry.monster.hp} / ダメージ ${entry.monster.atk}</div>
+                  ${entry.scout ? `<p class="muted">スカウト割引: 💰${entry.displayCost}</p>` : ""}
                   <div class="card-controls">
-                    <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.monster.cost}</button>
+                    <button class="small btn-primary purchase-cost-btn" data-act="buy" data-mid="${entry.monster.id}" data-slot-index="${entry.index}" ${pendingMonster ? "disabled" : ""}>💰${entry.displayCost}</button>
                     <button class="small ${entry.kept ? "btn-primary" : "btn-secondary"}" data-act="toggle-keep" data-slot-index="${entry.index}">${entry.kept ? "キープ中" : "キープ"}</button>
                   </div>
                 </article>`
@@ -1531,6 +1649,51 @@ function renderBattlePhase() {
 }
 
 function renderRewardPhase() {
+  const rewardType = gameState.pendingRewardType === "charisma" ? "charisma" : "scout";
+  if (rewardType === "scout") {
+    const scoutChoices = buildScoutRewardChoices(gameState.defeatedEnemyChoices);
+    app.innerHTML = `
+      <div class="center-phase">
+        <div class="topbar">
+          <h2>リワードフェーズ（スカウト）</h2>
+          <div class="badges">
+            <div class="badge">次ラウンド ${gameState.round}</div>
+            <div class="badge">コイン ${gameState.coins}</div>
+          </div>
+        </div>
+        <section class="panel">
+          <h3>倒した敵から1体を次ショップの割引候補にします</h3>
+          <p class="muted">※ 即加入ではありません（次ショップで半額・最低1コイン）。</p>
+          <div class="choices">
+            ${scoutChoices.map((m) => `
+              <article class="choice">
+                <h4>${m.name}</h4>
+                <p class="muted">種族: ${m.species} / 生息地: ${getMonsterHabitats(m).join("/") || "-"}</p>
+                <p class="muted">通常コスト 💰${m.cost} → スカウト価格 💰${getDiscountedScoutCost(m)}</p>
+                <button class="btn-secondary" data-act="pick-scout" data-mid="${m.id}">このモンスターをスカウト候補にする</button>
+              </article>
+            `).join("")}
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+            <button class="btn-secondary" data-act="skip-scout">見送る</button>
+          </div>
+        </section>
+      </div>
+    `;
+
+    app.querySelectorAll("[data-act='pick-scout']").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        update("pickScoutReward", { monsterId: btn.dataset.mid });
+        render();
+      });
+    });
+    app.querySelector("[data-act='skip-scout']")?.addEventListener("click", () => {
+      update("skipScoutReward");
+      render();
+    });
+    return;
+  }
+
   const visibleClassChoices = gameState.classChoices
     .map((id) => CLASS_CHOICES.find((c) => c.id === id))
     .filter(Boolean);
@@ -1593,6 +1756,7 @@ function renderRewardPhase() {
 }
 
 function renderRoutePhase() {
+  const defeatedPreview = buildScoutRewardChoices(gameState.defeatedEnemyChoices);
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
@@ -1600,17 +1764,27 @@ function renderRoutePhase() {
         <div class="badge">ラウンド ${gameState.round}</div>
       </div>
       <section class="panel">
+        ${
+          defeatedPreview.length > 0
+            ? `<p class="muted">前戦闘で倒した敵: ${defeatedPreview.map((m) => m.name).join(" / ")}</p>`
+            : ""
+        }
         <h3>次に進むルートを選択してください</h3>
         <div class="choices">
           ${ROUTE_CHOICES.map(
-            (route) => `
+            (route) => {
+              const previewEnemy = buildEnemyForRound(gameState.round, route);
+              const previewNames = buildScoutRewardChoices(previewEnemy.monsterIds).map((m) => m.name).join(" / ");
+              return `
             <article class="choice">
-              <h4>${route.label}</h4>
+              <h4>${route.label}${previewEnemy.isBoss ? "（ボス戦）" : ""}</h4>
               <p class="muted">敵HP補正 +${route.enemyHpBonus}</p>
               <p class="muted">敵攻撃補正 +${route.enemyAtkBonus}</p>
               <p class="muted">次回勝利ボーナス +${route.nextWinBonusCoins}コイン</p>
+              <p class="muted">出現候補: ${previewNames || "不明"}</p>
               <button class="btn-secondary" data-act="pick-route" data-rid="${route.id}">このルートに進む</button>
-            </article>`
+            </article>`;
+            }
           ).join("")}
         </div>
       </section>
