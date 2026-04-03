@@ -100,14 +100,7 @@ const CONFIG = {
   BATTLE_SPIN: {
     TICK_MS: 80,
     STOP_DELAYS: [240, 460, 700],
-    RESOLVE_DELAY: 780,
-    CELL_HEIGHT: 96,
-    BASE_SPEED: 820,
-    MIN_SPEED: 140,
-    DECEL_MS: 260,
-    RENDER_LOOPS: 5,
-    START_LOOP: 1,
-    TARGET_LOOP: 3
+    RESOLVE_DELAY: 780
   },
   REWARD: {
     BASE_COIN_OPTION: 5
@@ -131,6 +124,7 @@ const INITIAL_STATE = () => ({
   coins: 12,
   hp: 12,
   buildManualPlacement: false,
+  showCharismaModal: false,
   buildStatus: { type: "info", text: "モンスターを購入してリールに配置します" },
   shopChoices: rollShopEntries(MONSTERS, 3),
   monsterRerollCost: 4,
@@ -172,8 +166,6 @@ const INITIAL_STATE = () => ({
     spinningReelsStopped: [false, false, false],
     pendingSpinFinalGrid: null,
     pendingSpinResolution: null,
-    pendingSpinStopIndices: null,
-    reelVisuals: [],
     spinTimerIds: [],
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
@@ -592,16 +584,16 @@ function countOwnedClass(classId) {
 
 function canPickClass(classId) {
   const classData = CLASS_CHOICES.find((c) => c.id === classId);
-  if (!classData) return { ok: false, message: "不正な職業です。" };
+  if (!classData) return { ok: false, message: "不正なカリスマです。" };
   if (gameState.classSlots.length >= gameState.maxClassSlots) {
-    return { ok: false, message: "職業スロットが上限です。" };
+    return { ok: false, message: "カリスマ枠が上限です。" };
   }
   const duplicateCount = countOwnedClass(classId);
   if (classData.stackable === false && duplicateCount > 0) {
-    return { ok: false, message: "この経済系職業は重複できません。" };
+    return { ok: false, message: "この経済系カリスマは重複できません。" };
   }
   if (duplicateCount >= gameState.maxDuplicatePerClass) {
-    return { ok: false, message: "同じ職業はこれ以上選べません。" };
+    return { ok: false, message: "同じカリスマはこれ以上選べません。" };
   }
   return { ok: true, message: "" };
 }
@@ -613,6 +605,7 @@ function enterBuildPhaseFromReward() {
     gameState.coins += beastTamerCount * 2;
   }
   gameState.phase = "build";
+  gameState.showCharismaModal = false;
   gameState.unlockedRows = getUnlockedRowsForRound(gameState.round);
   resetBuildUiState();
   if (gameState.unlockedRows > prevUnlockedRows) {
@@ -712,6 +705,14 @@ function update(action, payload = {}) {
             : "モンスターを購入してリールに配置します"
         };
       }
+      return;
+    }
+    case "openCharismaModal": {
+      gameState.showCharismaModal = true;
+      return;
+    }
+    case "closeCharismaModal": {
+      gameState.showCharismaModal = false;
       return;
     }
     case "selectShopMonster": {
@@ -982,6 +983,7 @@ function update(action, payload = {}) {
         gameState.buildStatus = { type: "warn", text: "先に配置を完了してください" };
         return;
       }
+      gameState.showCharismaModal = false;
       clearBattleSpinTimers();
       gameState.currentBattleRoute = gameState.nextRoute;
       gameState.phase = "battle";
@@ -1000,8 +1002,6 @@ function update(action, payload = {}) {
         spinningReelsStopped: [false, false, false],
         pendingSpinFinalGrid: null,
         pendingSpinResolution: null,
-        pendingSpinStopIndices: null,
-        reelVisuals: [],
         spinTimerIds: [],
         turnResult: null,
         pendingOutcome: null,
@@ -1017,12 +1017,9 @@ function update(action, payload = {}) {
       gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
       gameState.battle.spinningReelsStopped = [false, false, false];
-      const spinResult = rollBattleSpinResult(gameState.reels);
-      const finalGrid = spinResult.grid;
-      const finalStopIndices = spinResult.stopIndices;
+      const finalGrid = spinVisibleGrid(gameState.reels);
       gameState.battle.pendingSpinFinalGrid = finalGrid;
-      gameState.battle.pendingSpinStopIndices = finalStopIndices;
-      gameState.battle.reelVisuals = buildBattleReelVisualState(finalStopIndices);
+      gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
       const damageBreakdown = calcDamageBreakdown(finalGrid, gameState.classSlots);
       const dmg = damageBreakdown.totalDamage;
       const playerActions = buildPlayerResultMessages(damageBreakdown);
@@ -1052,27 +1049,15 @@ function update(action, payload = {}) {
     case "battleSpinTick": {
       if (gameState.phase !== "battle") return;
       if (gameState.battle.subPhase !== "spinning") return;
-      const now = Date.now();
-      const tickSec = CONFIG.BATTLE_SPIN.TICK_MS / 1000;
-      const decelMs = Math.max(1, CONFIG.BATTLE_SPIN.DECEL_MS);
-      const speedRange = CONFIG.BATTLE_SPIN.BASE_SPEED - CONFIG.BATTLE_SPIN.MIN_SPEED;
-      (gameState.battle.reelVisuals ?? []).forEach((visual, reelIndex) => {
-        if (!visual || visual.isStopped) return;
-        const timeToStop = visual.stopAtMs - now;
-        if (timeToStop <= decelMs) {
-          const ratio = Math.max(0, Math.min(1, timeToStop / decelMs));
-          visual.speed = CONFIG.BATTLE_SPIN.MIN_SPEED + speedRange * ratio;
-        } else {
-          visual.speed = CONFIG.BATTLE_SPIN.BASE_SPEED;
-        }
-        visual.currentOffset += visual.speed * tickSec;
-        if (now >= visual.stopAtMs && visual.currentOffset >= visual.targetStopOffset) {
-          visual.currentOffset = visual.targetStopOffset;
-          visual.speed = 0;
-          visual.isStopped = true;
-          gameState.battle.spinningReelsStopped[reelIndex] = true;
-        }
-      });
+      const rollingGrid = spinVisibleGrid(gameState.reels);
+      const stopped = gameState.battle.spinningReelsStopped ?? [false, false, false];
+      for (let col = 0; col < 3; col += 1) {
+        if (stopped[col]) continue;
+        [0, 1, 2].forEach((row) => {
+          const idx = row * 3 + col;
+          gameState.battle.visibleGrid[idx] = rollingGrid[idx];
+        });
+      }
       return;
     }
     case "battleSpinStopReel": {
@@ -1082,12 +1067,6 @@ function update(action, payload = {}) {
       if (reelIndex < 0 || reelIndex > 2) return;
       const finalGrid = gameState.battle.pendingSpinFinalGrid;
       if (!Array.isArray(finalGrid) || finalGrid.length < 9) return;
-      const visual = gameState.battle.reelVisuals?.[reelIndex];
-      if (visual) {
-        visual.currentOffset = visual.targetStopOffset;
-        visual.speed = 0;
-        visual.isStopped = true;
-      }
       gameState.battle.spinningReelsStopped[reelIndex] = true;
       [0, 1, 2].forEach((row) => {
         const idx = row * 3 + reelIndex;
@@ -1110,7 +1089,6 @@ function update(action, payload = {}) {
       clearBattleSpinTimers();
       gameState.battle.pendingSpinFinalGrid = null;
       gameState.battle.pendingSpinResolution = null;
-      gameState.battle.pendingSpinStopIndices = null;
       gameState.battle.spinningReelsStopped = [true, true, true];
       applyBattleSpinResolution(resolution);
       return;
@@ -1544,7 +1522,7 @@ function buildPlayerResultMessages(damageBreakdown) {
     });
   }
   if (damageBreakdown.classBonusDamage > 0) {
-    lines.push(`クラス効果！ +${damageBreakdown.classBonusDamage}`);
+    lines.push(`カリスマ効果！ +${damageBreakdown.classBonusDamage}`);
   }
   lines.push(`合計${damageBreakdown.totalDamage}ダメージ！！`);
   return lines;
@@ -1678,17 +1656,103 @@ function getCurrentClassInfo(classSlots = []) {
   const grouped = getGroupedClassEntries(classSlots);
   if (grouped.length === 0) {
     return {
-      title: "現在の職業: なし",
+      title: "現在のカリスマ: なし",
       entries: []
     };
   }
   return {
-    title: "現在の職業",
+    title: "現在のカリスマ",
     entries: grouped.map((item) => ({
       label: `${item.name}${item.count > 1 ? ` x${item.count}` : ""}`,
       desc: item.desc
     }))
   };
+}
+
+function renderBuildStatusActions() {
+  if (gameState.reelInteractionConfirm) {
+    return `<div class="build-status-actions">
+      <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
+      <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
+    </div>`;
+  }
+  if (gameState.replacementConfirm) {
+    const isMerge = gameState.replacementConfirm.type === "merge";
+    return `<div class="build-status-actions">
+      <button class="small btn-secondary" data-act="cancel-replacement">キャンセル</button>
+      <button class="small btn-danger" data-act="confirm-replacement">${isMerge ? "合成する" : "置き換える"}</button>
+    </div>`;
+  }
+  return "";
+}
+
+function getSelectedMonsterInfoData() {
+  if (gameState.pendingPlacement) {
+    const unit = toReelUnit(gameState.pendingPlacement);
+    const monster = unit ? monsterById(unit.id) : null;
+    if (!monster || !unit) return null;
+    return {
+      monster,
+      star: unit.star,
+      note: "配置待ちモンスター",
+      sellValue: null
+    };
+  }
+  if (gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null) {
+    const unit = toReelUnit(gameState.reels[gameState.selectedSlotIndex]);
+    const monster = unit ? monsterById(unit.id) : null;
+    if (!monster || !unit) return null;
+    return {
+      monster,
+      star: unit.star,
+      note: "リール選択中",
+      sellValue: getSellValue(monster)
+    };
+  }
+  return null;
+}
+
+function renderSelectedMonsterInfoPanel() {
+  const info = getSelectedMonsterInfoData();
+  if (!info) {
+    return `<section class="panel selected-info-panel">
+      <h3>選択中モンスター</h3>
+      <div class="selected-info-placeholder">モンスターを選択してください。</div>
+    </section>`;
+  }
+  return `<section class="panel selected-info-panel">
+    <h3>選択中モンスター</h3>
+    <div class="selected-info-content">
+      ${renderHabitatBand(info.monster, "habitat-panel")}
+      <div class="monster-chip ${info.monster.cls} sp-${info.monster.species}">
+        <span>${getMonsterNameWithStars(info.monster.name, info.star)}</span>
+      </div>
+      <p>${info.note}</p>
+      <p>種族: ${info.monster.species} / 生息地: ${getMonsterHabitats(info.monster).join("/") || "-"}</p>
+      <p class="selected-info-stats">コスト ${info.monster.cost} / HP ${info.monster.hp} / 攻撃 ${info.monster.atk}</p>
+      ${info.sellValue != null ? `<p>売却価格: ${info.sellValue}</p>` : ""}
+    </div>
+  </section>`;
+}
+
+function renderCharismaModal() {
+  if (!gameState.showCharismaModal) return "";
+  const classInfo = getCurrentClassInfo(gameState.classSlots);
+  return `<div class="battle-modal-overlay">
+    <section class="panel battle-result-modal">
+      <div class="battle-log-modal-header">
+        <h3>カリスマ確認</h3>
+        <button class="small btn-secondary" data-act="close-charisma-modal">閉じる</button>
+      </div>
+      <div class="battle-log-modal-body">
+        ${
+          classInfo.entries.length === 0
+            ? '<p class="muted">カリスマはまだありません。</p>'
+            : `<ul>${classInfo.entries.map((entry) => `<li><strong>${entry.label}</strong><br/><span class="muted">${entry.desc}</span></li>`).join("")}</ul>`
+        }
+      </div>
+    </section>
+  </div>`;
 }
 
 function renderBuildPhase() {
@@ -1698,14 +1762,11 @@ function renderBuildPhase() {
       return { ...entry, index, monster, displayCost: getShopEntryCost(entry, monster) };
     })
     .filter((entry) => entry.monster);
-  const classInfo = getCurrentClassInfo(gameState.classSlots);
-  const selected = monsterById(gameState.selectedMonsterId);
-  const selectedStar = gameState.selectedMonsterStar ?? 1;
   const canSell = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null && gameState.pendingPlacement === null;
-  const sellValue = getSellValue(selected);
   const isReelSelection = gameState.selectedSource === "reel" && gameState.selectedSlotIndex !== null;
   const pendingMonster = getUnitMonster(gameState.pendingPlacement);
   const buildStatus = getBuildStatusDisplay();
+  const statusActions = renderBuildStatusActions();
   const showShopStatus =
     buildStatus.type !== "info"
     || buildStatus.text !== DEFAULT_BUILD_STATUS.text
@@ -1725,6 +1786,7 @@ function renderBuildPhase() {
             <div class="badge">コイン ${gameState.coins}</div>
             <div class="badge">HP ${gameState.hp}</div>
             <div class="badge">リール ${CONFIG.REEL.COLS}x${gameState.unlockedRows}</div>
+            <button class="small btn-secondary" data-act="open-charisma-modal">カリスマ確認</button>
           </div>
         </div>
       </div>
@@ -1763,16 +1825,9 @@ function renderBuildPhase() {
             </div>
             ${
               showShopStatus
-                ? `<div class="build-status-bar build-status-${buildStatus.type} ${gameState.reelInteractionConfirm ? "build-status-interaction" : ""}" title="${buildStatus.text}">
+                ? `<div class="build-status-bar build-status-${buildStatus.type} ${(gameState.reelInteractionConfirm || gameState.replacementConfirm) ? "build-status-interaction" : ""}" title="${buildStatus.text}">
                     <span>${buildStatus.text}</span>
-                    ${
-                      gameState.reelInteractionConfirm
-                        ? `<div class="build-status-actions">
-                            <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
-                            <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
-                          </div>`
-                        : ""
-                    }
+                    ${statusActions}
                   </div>`
                 : ""
             }
@@ -1831,70 +1886,11 @@ function renderBuildPhase() {
             }
           </section>
 
-          <section class="panel selected-info-panel">
-            <h3>選択中モンスター</h3>
-            <div class="selected-info-content">
-              ${
-                isReelSelection && selected
-                  ? `${renderHabitatBand(selected, "habitat-panel")}
-                     <div class="monster-chip ${selected.cls} sp-${selected.species}">
-                       <span>${getMonsterNameWithStars(selected.name, selectedStar)}</span>
-                     </div>
-                     <p>種族: ${selected.species} / 生息地: ${getMonsterHabitats(selected).join("/") || "-"}</p>
-                     <p class="selected-info-stats">コスト ${selected.cost} / HP ${selected.hp} / 攻撃 ${selected.atk}</p>
-                     <p>売却価格: ${sellValue}</p>`
-                  : `<div class="selected-info-placeholder">リールのモンスターを選択してください。</div>`
-              }
-            </div>
-          </section>
-
-          ${
-            gameState.reelInteractionConfirm
-              ? `<section class="panel">
-                  <h3>移動方法を選択</h3>
-                  <p>同一モンスター/同一レベルです。</p>
-                  <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
-                    <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
-                  </div>
-                </section>`
-              : ""
-          }
-
-          ${
-            gameState.replacementConfirm
-              ? `<section class="panel">
-                  <h3>${gameState.replacementConfirm.type === "merge" ? "合成確認" : "置き換え確認"}</h3>
-                  ${
-                    gameState.replacementConfirm.type === "merge"
-                      ? `<p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} と</p>
-                         <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を合成しますか？</p>`
-                      : `<p>${monsterById(gameState.replacementConfirm.targetUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.targetUnit)} を売却して、</p>
-                         <p>${monsterById(gameState.replacementConfirm.incomingUnit.id)?.name ?? "モンスター"} ${getMonsterStarLabel(gameState.replacementConfirm.incomingUnit)} を配置しますか？</p>
-                         <p>売却額: +${gameState.replacementConfirm.sellValue}コイン</p>`
-                  }
-                  <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="small btn-secondary" data-act="cancel-replacement">キャンセル</button>
-                    <button class="small btn-danger" data-act="confirm-replacement">${gameState.replacementConfirm.type === "merge" ? "合成する" : "置き換える"}</button>
-                  </div>
-                </section>`
-              : ""
-          }
-
-          <section class="panel">
-            <h3>現在の職業</h3>
-            <p><strong>${classInfo.title}</strong></p>
-            ${
-              classInfo.entries.length === 0
-                ? '<p class="muted">職業を獲得するとここに効果が表示されます。</p>'
-                : `<ul>${classInfo.entries
-                    .map((entry) => `<li><strong>${entry.label}</strong><br /><span class="muted">${entry.desc}</span></li>`)
-                    .join("")}</ul>`
-            }
-          </section>
+          ${renderSelectedMonsterInfoPanel()}
         </aside>
       </div>
     </div>
+    ${renderCharismaModal()}
   `;
 
   bindBuildEvents();
@@ -1986,6 +1982,15 @@ function bindBuildEvents() {
     render();
   });
 
+  app.querySelector("[data-act='open-charisma-modal']")?.addEventListener("click", () => {
+    update("openCharismaModal");
+    render();
+  });
+  app.querySelector("[data-act='close-charisma-modal']")?.addEventListener("click", () => {
+    update("closeCharismaModal");
+    render();
+  });
+
   const startBtn = app.querySelector("[data-act='start']");
   startBtn?.addEventListener("click", () => {
     update("startBattle");
@@ -2037,49 +2042,22 @@ function buildCompactTurnSummary({ playerActions = [], enemyAttack, outcome }) {
   return lines;
 }
 
-function renderBattleSlotChip(slotValue) {
-  const unit = toReelUnit(slotValue);
-  const monster = unit ? monsterById(unit.id) : null;
-  if (!monster) return '<div class="slot battle-cell"><div class="muted">Empty</div></div>';
-  return `<div class="slot battle-cell">
-    <div class="monster-chip ${monster.cls} sp-${monster.species}">
-      ${renderHabitatBand(monster, "habitat-band-chip")}
-      <span>${getMonsterNameWithStars(monster.name, unit.star)}</span>
-    </div>
-  </div>`;
-}
-
-function renderBattleReels() {
-  const isSpinning = gameState.battle.subPhase === "spinning";
+function renderBattleGridCells() {
   const stoppedReels = gameState.battle.spinningReelsStopped ?? [true, true, true];
-  if (!isSpinning) {
-    const columns = Array.from({ length: 3 }, (_, reelIndex) =>
-      Array.from({ length: 3 }, (_, row) => gameState.battle.visibleGrid[row * 3 + reelIndex] ?? null)
-    );
-    return columns
-      .map(
-        (column) => `
-      <div class="battle-reel-viewport battle-reel-stopped">
-        <div class="battle-reel-strip battle-reel-strip-static">
-          ${column.map((slotValue) => renderBattleSlotChip(slotValue)).join("")}
-        </div>
-      </div>
-    `
-      )
-      .join("");
-  }
-
-  return (gameState.battle.reelVisuals ?? [])
-    .map((visual, reelIndex) => {
-      if (!visual) return "";
-      const reelStoppedClass = stoppedReels[reelIndex] ? "battle-reel-stopped" : "";
-      return `
-        <div class="battle-reel-viewport ${reelStoppedClass}">
-          <div class="battle-reel-strip" style="transform: translateY(-${visual.currentOffset}px);">
-            ${visual.renderItems.map((item) => renderBattleSlotChip(item.slotValue)).join("")}
-          </div>
-        </div>
-      `;
+  return gameState.battle.visibleGrid
+    .map((slotValue, index) => {
+      const unit = toReelUnit(slotValue);
+      const m = unit ? monsterById(unit.id) : null;
+      const col = index % 3;
+      const reelStoppedClass = gameState.battle.subPhase === "spinning" && stoppedReels[col] ? "battle-reel-stopped" : "";
+      return `<div class="slot battle-cell ${reelStoppedClass}">${
+        m
+          ? `<div class="monster-chip ${m.cls} sp-${m.species}">
+              ${renderHabitatBand(m, "habitat-band-chip")}
+              <span>${getMonsterNameWithStars(m.name, unit.star)}</span>
+            </div>`
+          : '<div class="muted">Empty</div>'
+      }</div>`;
     })
     .join("");
 }
@@ -2197,7 +2175,7 @@ function renderBattlePhase() {
           <div class="badge">ターン ${gameState.battle.turn}</div>
           <div class="badge">プレイヤーHP ${gameState.hp}</div>
           <div class="badge">敵HP ${gameState.battle.enemyHp}</div>
-          <div class="badge">クラス効果: ${classBonusLabel}</div>
+          <div class="badge">カリスマ効果: ${classBonusLabel}</div>
         </div>
       </div>
 
@@ -2248,6 +2226,7 @@ function renderRewardPhase() {
     ));
     const rewardStatus = getBuildStatusDisplay();
     const mode = getBuildInteractionMode();
+    const statusActions = renderBuildStatusActions();
     const statusForReward =
       mode === "idle"
         ? { type: "info", text: "報酬を1つ選択してください" }
@@ -2275,8 +2254,9 @@ function renderRewardPhase() {
             </article>
           </div>
 
-          <div class="build-status-bar build-status-${statusForReward.type}" style="margin-top:12px;" title="${statusForReward.text}">
+          <div class="build-status-bar build-status-${statusForReward.type} ${(gameState.replacementConfirm || gameState.reelInteractionConfirm) ? "build-status-interaction" : ""}" style="margin-top:12px;" title="${statusForReward.text}">
             <span>${statusForReward.text}</span>
+            ${statusActions}
           </div>
           ${
             gameState.selectedRewardType === "coins"
@@ -2316,32 +2296,7 @@ function renderRewardPhase() {
               )
               .join("")}
           </div>
-
-          ${
-            gameState.replacementConfirm
-              ? `<section class="panel" style="margin-top:10px;">
-                  <h3>${gameState.replacementConfirm.type === "merge" ? "合成確認" : "置き換え確認"}</h3>
-                  <p>${
-                    gameState.replacementConfirm.type === "merge"
-                      ? "同一モンスター/同一レベルです。合成しますか？"
-                      : "既存モンスターを売却して置き換えますか？"
-                  }</p>
-                  <div style="display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="small btn-secondary" data-act="cancel-replacement">キャンセル</button>
-                    <button class="small btn-danger" data-act="confirm-replacement">${gameState.replacementConfirm.type === "merge" ? "合成する" : "置き換える"}</button>
-                  </div>
-                </section>`
-              : ""
-          }
-
-          ${
-            gameState.reelInteractionConfirm
-              ? `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
-                  <button class="small btn-primary" data-act="confirm-reel-merge">合成</button>
-                  <button class="small btn-secondary" data-act="cancel-reel-interaction">キャンセル</button>
-                </div>`
-              : ""
-          }
+          ${renderSelectedMonsterInfoPanel()}
         </section>
       </div>
     `;
@@ -2405,7 +2360,7 @@ function renderRewardPhase() {
   app.innerHTML = `
     <div class="center-phase">
       <div class="topbar">
-        <h2>リワードフェーズ（クラス選択）</h2>
+        <h2>リワードフェーズ（カリスマ選択）</h2>
         <div class="badges">
           <div class="badge">ラウンド ${gameState.round}</div>
           <div class="badge">コイン ${gameState.coins}</div>
@@ -2414,12 +2369,12 @@ function renderRewardPhase() {
 
       <section class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-          <h3>クラスを1つ選択してください</h3>
+          <h3>カリスマを1つ選択してください</h3>
           <button class="small btn-secondary" data-act="reroll-class">リロール (${gameState.classRerollCost}コイン)</button>
         </div>
         ${
           classSlotFull
-            ? '<p class="muted">職業スロットが上限です。「スキップ」で次のビルドへ進んでください。</p>'
+            ? '<p class="muted">カリスマ枠が上限です。「スキップ」で次のビルドへ進んでください。</p>'
             : ""
         }
         <div class="choices">
@@ -2430,7 +2385,7 @@ function renderRewardPhase() {
             <article class="choice">
               <h4>${c.name}</h4>
               <p class="muted">${c.desc}</p>
-              <button class="btn-secondary" data-act="pick" data-cid="${c.id}" ${classCheck.ok ? "" : "disabled"}>このクラスを選ぶ</button>
+              <button class="btn-secondary" data-act="pick" data-cid="${c.id}" ${classCheck.ok ? "" : "disabled"}>このカリスマを選ぶ</button>
               ${classCheck.ok ? "" : `<p class="muted" style="margin-top:6px;">${classCheck.message}</p>`}
             </article>`;
             }
