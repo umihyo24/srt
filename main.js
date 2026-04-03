@@ -1867,7 +1867,10 @@ function renderBuildPhase() {
                             monster
                               ? `<div class="monster-chip ${monster.cls} sp-${monster.species}">
                                   ${renderHabitatBand(monster, "habitat-band-chip")}
-                                  <span>${getMonsterNameWithStars(monster.name, getUnitStar(slotValue))}</span>
+                                  <span>${monster.emoji ? `${monster.emoji} ` : ""}${getMonsterNameWithStars(
+                                    monster.name,
+                                    getUnitStar(slotValue)
+                                  )}</span>
                                 </div>`
                               : "空"
                           }
@@ -2069,12 +2072,16 @@ function renderBattleGridCells() {
         m
           ? `<div class="monster-chip ${m.cls} sp-${m.species}">
               ${renderHabitatBand(m, "habitat-band-chip")}
-              <span>${getMonsterNameWithStars(m.name, unit.star)}</span>
+              <span>${m.emoji ? `${m.emoji} ` : ""}${getMonsterNameWithStars(m.name, unit.star)}</span>
             </div>`
           : '<div class="muted">Empty</div>'
       }</div>`;
     })
     .join("");
+}
+
+function renderBattleReels() {
+  return renderBattleGridCells();
 }
 
 function renderCompactBattleSummary() {
@@ -2299,7 +2306,10 @@ function renderRewardPhase() {
                             monster
                               ? `<div class="monster-chip ${monster.cls} sp-${monster.species}">
                                   ${renderHabitatBand(monster, "habitat-band-chip")}
-                                  <span>${getMonsterNameWithStars(monster.name, getUnitStar(slotValue))}</span>
+                                  <span>${monster.emoji ? `${monster.emoji} ` : ""}${getMonsterNameWithStars(
+                                    monster.name,
+                                    getUnitStar(slotValue)
+                                  )}</span>
                                 </div>`
                               : "空"
                           }
