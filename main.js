@@ -100,7 +100,14 @@ const CONFIG = {
   BATTLE_SPIN: {
     TICK_MS: 80,
     STOP_DELAYS: [240, 460, 700],
-    RESOLVE_DELAY: 780
+    RESOLVE_DELAY: 780,
+    CELL_HEIGHT: 96,
+    BASE_SPEED: 820,
+    MIN_SPEED: 140,
+    DECEL_MS: 260,
+    RENDER_LOOPS: 5,
+    START_LOOP: 1,
+    TARGET_LOOP: 3
   },
   REWARD: {
     BASE_COIN_OPTION: 5
@@ -165,6 +172,8 @@ const INITIAL_STATE = () => ({
     spinningReelsStopped: [false, false, false],
     pendingSpinFinalGrid: null,
     pendingSpinResolution: null,
+    pendingSpinStopIndices: null,
+    reelVisuals: [],
     spinTimerIds: [],
     turnResult: null,
     pendingOutcome: null, // continue | victory | defeat | null
@@ -991,6 +1000,8 @@ function update(action, payload = {}) {
         spinningReelsStopped: [false, false, false],
         pendingSpinFinalGrid: null,
         pendingSpinResolution: null,
+        pendingSpinStopIndices: null,
+        reelVisuals: [],
         spinTimerIds: [],
         turnResult: null,
         pendingOutcome: null,
@@ -1006,9 +1017,12 @@ function update(action, payload = {}) {
       gameState.battle.subPhase = "spinning";
       gameState.battle.turn += 1;
       gameState.battle.spinningReelsStopped = [false, false, false];
-      const finalGrid = spinVisibleGrid(gameState.reels);
+      const spinResult = rollBattleSpinResult(gameState.reels);
+      const finalGrid = spinResult.grid;
+      const finalStopIndices = spinResult.stopIndices;
       gameState.battle.pendingSpinFinalGrid = finalGrid;
-      gameState.battle.visibleGrid = spinVisibleGrid(gameState.reels);
+      gameState.battle.pendingSpinStopIndices = finalStopIndices;
+      gameState.battle.reelVisuals = buildBattleReelVisualState(finalStopIndices);
       const damageBreakdown = calcDamageBreakdown(finalGrid, gameState.classSlots);
       const dmg = damageBreakdown.totalDamage;
       const playerActions = buildPlayerResultMessages(damageBreakdown);
@@ -1038,15 +1052,27 @@ function update(action, payload = {}) {
     case "battleSpinTick": {
       if (gameState.phase !== "battle") return;
       if (gameState.battle.subPhase !== "spinning") return;
-      const rollingGrid = spinVisibleGrid(gameState.reels);
-      const stopped = gameState.battle.spinningReelsStopped ?? [false, false, false];
-      for (let col = 0; col < 3; col += 1) {
-        if (stopped[col]) continue;
-        [0, 1, 2].forEach((row) => {
-          const idx = row * 3 + col;
-          gameState.battle.visibleGrid[idx] = rollingGrid[idx];
-        });
-      }
+      const now = Date.now();
+      const tickSec = CONFIG.BATTLE_SPIN.TICK_MS / 1000;
+      const decelMs = Math.max(1, CONFIG.BATTLE_SPIN.DECEL_MS);
+      const speedRange = CONFIG.BATTLE_SPIN.BASE_SPEED - CONFIG.BATTLE_SPIN.MIN_SPEED;
+      (gameState.battle.reelVisuals ?? []).forEach((visual, reelIndex) => {
+        if (!visual || visual.isStopped) return;
+        const timeToStop = visual.stopAtMs - now;
+        if (timeToStop <= decelMs) {
+          const ratio = Math.max(0, Math.min(1, timeToStop / decelMs));
+          visual.speed = CONFIG.BATTLE_SPIN.MIN_SPEED + speedRange * ratio;
+        } else {
+          visual.speed = CONFIG.BATTLE_SPIN.BASE_SPEED;
+        }
+        visual.currentOffset += visual.speed * tickSec;
+        if (now >= visual.stopAtMs && visual.currentOffset >= visual.targetStopOffset) {
+          visual.currentOffset = visual.targetStopOffset;
+          visual.speed = 0;
+          visual.isStopped = true;
+          gameState.battle.spinningReelsStopped[reelIndex] = true;
+        }
+      });
       return;
     }
     case "battleSpinStopReel": {
@@ -1056,6 +1082,12 @@ function update(action, payload = {}) {
       if (reelIndex < 0 || reelIndex > 2) return;
       const finalGrid = gameState.battle.pendingSpinFinalGrid;
       if (!Array.isArray(finalGrid) || finalGrid.length < 9) return;
+      const visual = gameState.battle.reelVisuals?.[reelIndex];
+      if (visual) {
+        visual.currentOffset = visual.targetStopOffset;
+        visual.speed = 0;
+        visual.isStopped = true;
+      }
       gameState.battle.spinningReelsStopped[reelIndex] = true;
       [0, 1, 2].forEach((row) => {
         const idx = row * 3 + reelIndex;
@@ -1078,6 +1110,7 @@ function update(action, payload = {}) {
       clearBattleSpinTimers();
       gameState.battle.pendingSpinFinalGrid = null;
       gameState.battle.pendingSpinResolution = null;
+      gameState.battle.pendingSpinStopIndices = null;
       gameState.battle.spinningReelsStopped = [true, true, true];
       applyBattleSpinResolution(resolution);
       return;
@@ -1248,9 +1281,15 @@ function getFirstEmptyVisualSlotIndex(reels) {
 }
 
 function spinVisibleGrid(reels) {
+  const result = rollBattleSpinResult(reels);
+  return result.grid;
+}
+
+function buildGridFromStopIndices(reels, stopIndices = []) {
   const reelWindows = Array.from({ length: 3 }, (_, reelIndex) => {
     const strip = getReelStrip(reels, reelIndex);
-    const stopIndex = Math.floor(Math.random() * strip.length);
+    const fallbackStop = Math.floor(Math.random() * strip.length);
+    const stopIndex = Number.isInteger(stopIndices[reelIndex]) ? stopIndices[reelIndex] : fallbackStop;
     return getVisibleWindowFromStop(strip, stopIndex, 3);
   });
 
@@ -1261,6 +1300,57 @@ function spinVisibleGrid(reels) {
     }
   }
   return grid;
+}
+
+function rollBattleSpinResult(reels) {
+  const stopIndices = Array.from({ length: 3 }, (_, reelIndex) => {
+    const strip = getReelStrip(reels, reelIndex);
+    return Math.floor(Math.random() * strip.length);
+  });
+  return {
+    stopIndices,
+    grid: buildGridFromStopIndices(reels, stopIndices)
+  };
+}
+
+function buildLoopingReelRenderItems(strip = [], loops = CONFIG.BATTLE_SPIN.RENDER_LOOPS) {
+  const safeStrip = Array.isArray(strip) && strip.length > 0 ? strip : [null];
+  const safeLoops = Math.max(3, loops);
+  return Array.from({ length: safeLoops }, (_, loopIndex) =>
+    safeStrip.map((slotValue, stripIndex) => ({
+      slotValue,
+      key: `${loopIndex}-${stripIndex}`
+    }))
+  ).flat();
+}
+
+function buildBattleReelVisualState(stopIndices = []) {
+  const now = Date.now();
+  const cellHeight = CONFIG.BATTLE_SPIN.CELL_HEIGHT;
+  const stopDelays = CONFIG.BATTLE_SPIN.STOP_DELAYS;
+  return Array.from({ length: 3 }, (_, reelIndex) => {
+    const strip = getReelStrip(gameState.reels, reelIndex);
+    const renderItems = buildLoopingReelRenderItems(strip, CONFIG.BATTLE_SPIN.RENDER_LOOPS);
+    const stripLength = strip.length || 1;
+    const cycleHeight = stripLength * cellHeight;
+    const startIndex = Math.floor(Math.random() * stripLength);
+    const stopIndex = Number.isInteger(stopIndices[reelIndex]) ? stopIndices[reelIndex] : 0;
+    const startOffset = (CONFIG.BATTLE_SPIN.START_LOOP * stripLength + startIndex) * cellHeight;
+    let targetOffset = (CONFIG.BATTLE_SPIN.TARGET_LOOP * stripLength + stopIndex) * cellHeight;
+    while (targetOffset <= startOffset + cycleHeight) {
+      targetOffset += cycleHeight;
+    }
+
+    return {
+      strip,
+      renderItems,
+      currentOffset: startOffset,
+      speed: CONFIG.BATTLE_SPIN.BASE_SPEED,
+      targetStopOffset: targetOffset,
+      stopAtMs: now + (stopDelays[reelIndex] ?? stopDelays[stopDelays.length - 1] ?? 700),
+      isStopped: false
+    };
+  });
 }
 
 function getMonsterHabitats(monster) {
@@ -1947,22 +2037,49 @@ function buildCompactTurnSummary({ playerActions = [], enemyAttack, outcome }) {
   return lines;
 }
 
-function renderBattleGridCells() {
+function renderBattleSlotChip(slotValue) {
+  const unit = toReelUnit(slotValue);
+  const monster = unit ? monsterById(unit.id) : null;
+  if (!monster) return '<div class="slot battle-cell"><div class="muted">Empty</div></div>';
+  return `<div class="slot battle-cell">
+    <div class="monster-chip ${monster.cls} sp-${monster.species}">
+      ${renderHabitatBand(monster, "habitat-band-chip")}
+      <span>${getMonsterNameWithStars(monster.name, unit.star)}</span>
+    </div>
+  </div>`;
+}
+
+function renderBattleReels() {
+  const isSpinning = gameState.battle.subPhase === "spinning";
   const stoppedReels = gameState.battle.spinningReelsStopped ?? [true, true, true];
-  return gameState.battle.visibleGrid
-    .map((slotValue, index) => {
-      const unit = toReelUnit(slotValue);
-      const m = unit ? monsterById(unit.id) : null;
-      const col = index % 3;
-      const reelStoppedClass = gameState.battle.subPhase === "spinning" && stoppedReels[col] ? "battle-reel-stopped" : "";
-      return `<div class="slot battle-cell ${reelStoppedClass}">${
-        m
-          ? `<div class="monster-chip ${m.cls} sp-${m.species}">
-              ${renderHabitatBand(m, "habitat-band-chip")}
-              <span>${getMonsterNameWithStars(m.name, unit.star)}</span>
-            </div>`
-          : '<div class="muted">Empty</div>'
-      }</div>`;
+  if (!isSpinning) {
+    const columns = Array.from({ length: 3 }, (_, reelIndex) =>
+      Array.from({ length: 3 }, (_, row) => gameState.battle.visibleGrid[row * 3 + reelIndex] ?? null)
+    );
+    return columns
+      .map(
+        (column) => `
+      <div class="battle-reel-viewport battle-reel-stopped">
+        <div class="battle-reel-strip battle-reel-strip-static">
+          ${column.map((slotValue) => renderBattleSlotChip(slotValue)).join("")}
+        </div>
+      </div>
+    `
+      )
+      .join("");
+  }
+
+  return (gameState.battle.reelVisuals ?? [])
+    .map((visual, reelIndex) => {
+      if (!visual) return "";
+      const reelStoppedClass = stoppedReels[reelIndex] ? "battle-reel-stopped" : "";
+      return `
+        <div class="battle-reel-viewport ${reelStoppedClass}">
+          <div class="battle-reel-strip" style="transform: translateY(-${visual.currentOffset}px);">
+            ${visual.renderItems.map((item) => renderBattleSlotChip(item.slotValue)).join("")}
+          </div>
+        </div>
+      `;
     })
     .join("");
 }
@@ -2037,7 +2154,7 @@ function renderBattleCenterPanel() {
       <h3>スロット（${gameState.battle.gridCols}x${gameState.battle.gridRows}）</h3>
       <p class="muted">現在ステップ: ${statusText}</p>
       <div class="machine battle-machine-grid" style="--grid-cols:${gameState.battle.gridCols};">
-        ${renderBattleGridCells()}
+        ${renderBattleReels()}
       </div>
       <div class="battle-action-row">
         <button class="btn-primary battle-spin-btn" data-act="spin" ${canSpin ? "" : "disabled"}>スピンして攻撃</button>
