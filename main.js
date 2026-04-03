@@ -1259,9 +1259,15 @@ function getFirstEmptyVisualSlotIndex(reels) {
 }
 
 function spinVisibleGrid(reels) {
+  const result = rollBattleSpinResult(reels);
+  return result.grid;
+}
+
+function buildGridFromStopIndices(reels, stopIndices = []) {
   const reelWindows = Array.from({ length: 3 }, (_, reelIndex) => {
     const strip = getReelStrip(reels, reelIndex);
-    const stopIndex = Math.floor(Math.random() * strip.length);
+    const fallbackStop = Math.floor(Math.random() * strip.length);
+    const stopIndex = Number.isInteger(stopIndices[reelIndex]) ? stopIndices[reelIndex] : fallbackStop;
     return getVisibleWindowFromStop(strip, stopIndex, 3);
   });
 
@@ -1272,6 +1278,57 @@ function spinVisibleGrid(reels) {
     }
   }
   return grid;
+}
+
+function rollBattleSpinResult(reels) {
+  const stopIndices = Array.from({ length: 3 }, (_, reelIndex) => {
+    const strip = getReelStrip(reels, reelIndex);
+    return Math.floor(Math.random() * strip.length);
+  });
+  return {
+    stopIndices,
+    grid: buildGridFromStopIndices(reels, stopIndices)
+  };
+}
+
+function buildLoopingReelRenderItems(strip = [], loops = CONFIG.BATTLE_SPIN.RENDER_LOOPS) {
+  const safeStrip = Array.isArray(strip) && strip.length > 0 ? strip : [null];
+  const safeLoops = Math.max(3, loops);
+  return Array.from({ length: safeLoops }, (_, loopIndex) =>
+    safeStrip.map((slotValue, stripIndex) => ({
+      slotValue,
+      key: `${loopIndex}-${stripIndex}`
+    }))
+  ).flat();
+}
+
+function buildBattleReelVisualState(stopIndices = []) {
+  const now = Date.now();
+  const cellHeight = CONFIG.BATTLE_SPIN.CELL_HEIGHT;
+  const stopDelays = CONFIG.BATTLE_SPIN.STOP_DELAYS;
+  return Array.from({ length: 3 }, (_, reelIndex) => {
+    const strip = getReelStrip(gameState.reels, reelIndex);
+    const renderItems = buildLoopingReelRenderItems(strip, CONFIG.BATTLE_SPIN.RENDER_LOOPS);
+    const stripLength = strip.length || 1;
+    const cycleHeight = stripLength * cellHeight;
+    const startIndex = Math.floor(Math.random() * stripLength);
+    const stopIndex = Number.isInteger(stopIndices[reelIndex]) ? stopIndices[reelIndex] : 0;
+    const startOffset = (CONFIG.BATTLE_SPIN.START_LOOP * stripLength + startIndex) * cellHeight;
+    let targetOffset = (CONFIG.BATTLE_SPIN.TARGET_LOOP * stripLength + stopIndex) * cellHeight;
+    while (targetOffset <= startOffset + cycleHeight) {
+      targetOffset += cycleHeight;
+    }
+
+    return {
+      strip,
+      renderItems,
+      currentOffset: startOffset,
+      speed: CONFIG.BATTLE_SPIN.BASE_SPEED,
+      targetStopOffset: targetOffset,
+      stopAtMs: now + (stopDelays[reelIndex] ?? stopDelays[stopDelays.length - 1] ?? 700),
+      isStopped: false
+    };
+  });
 }
 
 function getMonsterHabitats(monster) {
@@ -2075,7 +2132,7 @@ function renderBattleCenterPanel() {
       <h3>スロット（${gameState.battle.gridCols}x${gameState.battle.gridRows}）</h3>
       <p class="muted">現在ステップ: ${statusText}</p>
       <div class="machine battle-machine-grid" style="--grid-cols:${gameState.battle.gridCols};">
-        ${renderBattleGridCells()}
+        ${renderBattleReels()}
       </div>
       <div class="battle-action-row">
         <button class="btn-primary battle-spin-btn" data-act="spin" ${canSpin ? "" : "disabled"}>スピンして攻撃</button>

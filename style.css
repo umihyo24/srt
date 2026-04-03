@@ -377,7 +377,7 @@ button {
 }
 
 .battle-machine-grid {
-  grid-template-columns: repeat(var(--grid-cols, 3), minmax(92px, 1fr));
+  grid-template-columns: repeat(var(--grid-cols, 3), minmax(108px, 1fr));
 }
 
 .battle-cell {
