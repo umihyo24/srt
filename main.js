@@ -1,15 +1,15 @@
 const MONSTERS = [
-  { id: "slime", name: "スライム", species: "slime", cost: 1, hp: 1, atk: 1, cls: "m-slime", habitats: ["water"] },
-  { id: "skeleton", name: "スケルトン", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-skeleton", habitats: ["cave"] },
-  { id: "zombie", name: "ゾンビ", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-zombie", habitats: ["swamp", "cave"] },
-  { id: "bat", name: "バット", species: "beast", cost: 1, hp: 1, atk: 1, cls: "m-bat", habitats: ["cave"] },
-  { id: "wolf", name: "ウルフ", species: "beast", cost: 2, hp: 2, atk: 3, cls: "m-wolf", habitats: ["forest"] },
-  { id: "goblin", name: "ゴブリン", species: "humanoid", cost: 1, hp: 2, atk: 1, cls: "m-goblin", habitats: ["forest", "swamp"] },
-  { id: "imp", name: "インプ", species: "demon", cost: 2, hp: 1, atk: 3, cls: "m-imp", habitats: ["volcano"] },
-  { id: "knight", name: "ナイト", species: "humanoid", cost: 3, hp: 3, atk: 3, cls: "m-knight", habitats: ["forest"] },
-  { id: "ghost", name: "ゴースト", species: "undead", cost: 2, hp: 1, atk: 2, cls: "m-ghost", habitats: ["cave"] },
-  { id: "mushroom", name: "マッシュルーム", species: "plant", cost: 1, hp: 2, atk: 1, cls: "m-mushroom", habitats: ["forest", "swamp"] },
-  { id: "lizard", name: "リザード", species: "reptile", cost: 2, hp: 2, atk: 2, cls: "m-lizard", habitats: ["swamp", "water"] }
+  { id: "slime", name: "スライム", emoji: "🟢", species: "slime", cost: 1, hp: 1, atk: 1, cls: "m-slime", habitats: ["water"] },
+  { id: "skeleton", name: "スケルトン", emoji: "💀", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-skeleton", habitats: ["cave"] },
+  { id: "zombie", name: "ゾンビ", emoji: "🧟", species: "undead", cost: 2, hp: 2, atk: 2, cls: "m-zombie", habitats: ["swamp", "cave"] },
+  { id: "bat", name: "バット", emoji: "🦇", species: "beast", cost: 1, hp: 1, atk: 1, cls: "m-bat", habitats: ["cave"] },
+  { id: "wolf", name: "ウルフ", emoji: "🐺", species: "beast", cost: 2, hp: 2, atk: 3, cls: "m-wolf", habitats: ["forest"] },
+  { id: "goblin", name: "ゴブリン", emoji: "👺", species: "humanoid", cost: 1, hp: 2, atk: 1, cls: "m-goblin", habitats: ["forest", "swamp"] },
+  { id: "imp", name: "インプ", emoji: "😈", species: "demon", cost: 2, hp: 1, atk: 3, cls: "m-imp", habitats: ["volcano"] },
+  { id: "knight", name: "ナイト", emoji: "🛡️", species: "humanoid", cost: 3, hp: 3, atk: 3, cls: "m-knight", habitats: ["forest"] },
+  { id: "ghost", name: "ゴースト", emoji: "👻", species: "undead", cost: 2, hp: 1, atk: 2, cls: "m-ghost", habitats: ["cave"] },
+  { id: "mushroom", name: "マッシュルーム", emoji: "🍄", species: "plant", cost: 1, hp: 2, atk: 1, cls: "m-mushroom", habitats: ["forest", "swamp"] },
+  { id: "lizard", name: "リザード", emoji: "🦎", species: "reptile", cost: 2, hp: 2, atk: 2, cls: "m-lizard", habitats: ["swamp", "water"] }
 ];
 
 const CLASS_CHOICES = [
@@ -249,7 +249,8 @@ function formatUnitForLog(unitLike) {
   if (!unit) return "不明";
   const monster = monsterById(unit.id);
   const name = monster?.name ?? unit.id;
-  return `${name}${getStarDisplay(unit.star)}`;
+  const visual = monster?.emoji ? `${monster.emoji}` : name;
+  return `${visual}${getStarDisplay(unit.star)}`;
 }
 
 function clearReelSelection() {
@@ -1558,6 +1559,18 @@ function renderHabitatBand(monster, className = "habitat-panel") {
   return `<div class="${className}" style="${buildHabitatPanelStyle(monster)}"></div>`;
 }
 
+function renderMonsterVisual(monster, options = {}) {
+  if (!monster) return '<div class="monster-visual-fallback">?</div>';
+  const imagePath = options.imagePath || monster.image || null;
+  if (imagePath) {
+    return `<img class="monster-visual-image" src="${imagePath}" alt="${monster.name}" loading="lazy" />`;
+  }
+  if (monster.emoji) {
+    return `<div class="monster-emoji" aria-hidden="true">${monster.emoji}</div>`;
+  }
+  return `<div class="monster-visual-fallback">${monster.name}</div>`;
+}
+
 function renderMonsterCard(monster, options = {}) {
   if (!monster) return "";
   const {
@@ -1574,6 +1587,7 @@ function renderMonsterCard(monster, options = {}) {
   return `
     <article class="card ${monster.cls} ${containerClass} ${selectedClass}" ${clickableAttrs}>
       ${renderHabitatBand(monster, "habitat-panel")}
+      <div class="monster-visual">${renderMonsterVisual(monster)}</div>
       <h4>${getMonsterNameWithStars(monster.name, star)}</h4>
       <div class="stats">HP ${monster.hp} / ダメージ ${monster.atk}</div>
       ${extraInfoHtml}
@@ -1993,6 +2007,7 @@ function bindBuildEvents() {
 
   const startBtn = app.querySelector("[data-act='start']");
   startBtn?.addEventListener("click", () => {
+    update("closeCharismaModal");
     update("startBattle");
     render();
   });

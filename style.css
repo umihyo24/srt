@@ -231,6 +231,29 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
+.monster-visual {
+  display: grid;
+  place-items: center;
+  margin-bottom: 6px;
+  min-height: 30px;
+}
+
+.monster-emoji {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.monster-visual-fallback {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.monster-visual-image {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
 .build-selected-shop {
   border-color: #ffcf72;
   box-shadow: inset 0 0 0 1px rgba(255, 207, 114, 0.45);
